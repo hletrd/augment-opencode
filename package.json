@@ -10,9 +10,12 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "start:js": "node server.js",
     "dev": "tsx watch src/server.ts",
-    "dev:build": "tsc --watch"
+    "dev:build": "tsc --watch",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "format": "prettier --write src/",
+    "format:check": "prettier --check src/"
   },
   "keywords": [
     "auggie",
@@ -25,16 +28,19 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=24.0.0"
   },
   "dependencies": {
     "@augmentcode/auggie-sdk": "^0.1.13",
     "dotenv": "^17.2.3"
   },
   "devDependencies": {
-    "@types/dotenv": "^6.1.1",
-    "@types/node": "^22.0.0",
+    "@eslint/js": "^9.27.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.27.0",
+    "prettier": "^3.5.3",
     "tsx": "^4.21.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.32.1"
   }
 }

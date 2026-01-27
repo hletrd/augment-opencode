@@ -4,9 +4,21 @@ An OpenAI-compatible API proxy that routes requests to Augment Code backends via
 
 This wrapper allows you to use [OpenCode](https://opencode.ai) or any other OpenAI-compatible client with Augment Code backends through Augment Code's powerful context engine.
 
+## Features
+
+- **OpenAI-compatible API** - Drop-in replacement for OpenAI API
+- **Real-time streaming** - True SSE streaming with all ACP protocol update types
+- **Multiple models** - Claude Opus 4.5, Sonnet 4.5, Sonnet 4, Haiku 4.5, GPT-5.x
+- **Automatic retry** - Exponential backoff for rate limits and transient errors
+- **Request validation** - Validates message format and model names
+- **Graceful shutdown** - Clean shutdown with connection draining
+- **Health monitoring** - Detailed health check with metrics and uptime
+- **Structured logging** - JSON logging with request IDs and timing
+- **Request metrics** - Track success rates, latency, and error types
+
 ## Prerequisites
 
-- Node.js 22 or later
+- Node.js 24 or later
 - Auggie CLI installed and authenticated
 - An Augment Code account
 
@@ -170,6 +182,9 @@ curl http://localhost:8765/v1/chat/completions \
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8765` | Server port |
+| `DEBUG` | `false` | Enable debug logging |
+| `REQUEST_TIMEOUT_MS` | `300000` | Request timeout (5 minutes) |
+| `SHUTDOWN_TIMEOUT_MS` | `30000` | Graceful shutdown timeout (30 seconds) |
 
 ### Available Models
 
@@ -181,6 +196,9 @@ All models are available simultaneously. Select the model in your API request:
 | `claude-sonnet-4.5` | `sonnet4.5` | Balanced performance (200K context, 16K output) |
 | `claude-sonnet-4` | `sonnet4` | Previous generation (200K context, 16K output) |
 | `claude-haiku-4.5` | `haiku4.5` | Fastest, lightweight (200K context, 8K output) |
+| `gpt-5` | `gpt5` | GPT-5 legacy (128K context, 16K output) |
+| `gpt-5.1` | `gpt5.1` | Strong reasoning (128K context, 16K output) |
+| `gpt-5.2` | `gpt5.2` | Smarter, slower (128K context, 16K output) |
 
 ## API Endpoints
 
@@ -189,16 +207,44 @@ All models are available simultaneously. Select the model in your API request:
 | `/v1/chat/completions` | POST | Chat completions (supports streaming) |
 | `/v1/models` | GET | List available models |
 | `/v1/models/{id}` | GET | Get model details |
-| `/health` | GET | Health check |
-| `/` | GET | Health check |
+| `/health` | GET | Detailed health check with metrics |
+| `/metrics` | GET | Raw request metrics (JSON) |
+| `/`, `/healthz`, `/ready` | GET | Simple health check for load balancers |
 
 ## How It Works
 
 1. The wrapper exposes OpenAI-compatible API endpoints
-2. When a chat completion request is received, it formats the messages into a prompt
+2. When a chat completion request is received, it validates and formats the messages
 3. The prompt is sent to the Augment Code SDK using your authenticated session
-4. The SDK processes the request using Claude Opus 4.5 through Augment's infrastructure
-5. The response is formatted back into OpenAI's response format
+4. The SDK processes the request through Augment's infrastructure
+5. Real-time streaming updates are sent via Server-Sent Events (SSE)
+6. The response is formatted back into OpenAI's response format
+
+### Streaming Update Types
+
+When streaming is enabled, the server sends all ACP protocol update types:
+
+| Update Type | Description | OpenAI Field |
+|-------------|-------------|--------------|
+| `agent_message_chunk` | Text content | `delta.content` |
+| `agent_thought_chunk` | Reasoning | `delta.reasoning_content` |
+| `tool_call` | Tool execution started | `delta.tool_calls[]` |
+| `tool_call_update` | Tool progress/results | `delta.tool_metadata` |
+| `plan` | Execution plan | `delta.plan[]` |
+| `available_commands_update` | Commands | `delta.available_commands[]` |
+| `current_mode_update` | Mode changes | `delta.current_mode` |
+
+### Error Handling
+
+The server automatically retries on transient errors:
+
+| Error Type | Behavior |
+|------------|----------|
+| Rate limit (429) | Retry with exponential backoff |
+| Server errors (5xx) | Retry up to 3 times |
+| Network timeouts | Retry with backoff |
+| Context length exceeded | Return 400 error immediately |
+| Invalid API key | Return 401 error immediately |
 
 ## Authentication
 

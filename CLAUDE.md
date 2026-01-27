@@ -11,20 +11,20 @@ Auggie Wrapper is an OpenAI-compatible API proxy that routes requests to Claude 
 ## Architecture
 
 ```
-OpenCode/Client → HTTP Request → server.js → Auggie SDK → Augment Code API → Claude Model
+OpenCode/Client → HTTP Request → src/server.ts (builds to dist/server.js) → Auggie SDK → Augment Code API → Claude Model
 ```
 
 ### Key Components
 
 | File | Purpose |
 |------|---------|
-| `server.js` | Main HTTP server - OpenAI-compatible API proxy (ES modules) |
+| `src/server.ts` | Main HTTP server - OpenAI-compatible API proxy (TypeScript) |
 | `setup.sh` | Automated setup script for dependencies and OpenCode config |
 | `package.json` | Node.js project configuration |
 | `README.md` | User documentation |
 | `CLAUDE.md` | AI assistant guidance (this file) |
 
-### server.js Details
+### server.ts Details
 
 - Single-file Node.js HTTP server using native `http` module
 - ES modules (`"type": "module"` in package.json)
@@ -76,7 +76,7 @@ curl -X POST http://localhost:8765/v1/chat/completions \
 
 ## Code Patterns
 
-### Model Mapping (server.js)
+### Model Mapping (src/server.ts)
 
 ```javascript
 const DEFAULT_MODEL = 'claude-opus-4.5';
@@ -138,6 +138,9 @@ function formatMessages(messages) {
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8765` | Server port |
+| `DEBUG` | `false` | Enable debug logging (`true` or `1`) |
+| `REQUEST_TIMEOUT_MS` | `300000` | Request timeout in ms (5 minutes) |
+| `SHUTDOWN_TIMEOUT_MS` | `30000` | Graceful shutdown timeout in ms (30 seconds) |
 
 ### OpenCode Configuration
 
@@ -167,14 +170,14 @@ Provider uses `@ai-sdk/openai-compatible` npm package:
 | `@augmentcode/auggie-sdk` | Augment Code SDK for API access |
 
 **Runtime Requirements**:
-- Node.js 22+ (ES modules, native fetch)
+- Node.js 24+ (ES modules, native fetch)
 - Auggie CLI authenticated (`auggie login`)
 
 ## Development Guidelines
 
 ### Adding a New Model
 
-1. Add entry to `MODEL_MAP` in `server.js`:
+1. Add entry to `MODEL_MAP` in `src/server.ts`:
    ```javascript
    'claude-new-model': { auggie: 'newmodel', name: 'Claude New Model', context: 200000, output: 16000 },
    ```
@@ -199,27 +202,95 @@ Provider uses `@ai-sdk/openai-compatible` npm package:
 
 ## Streaming & Real-time Updates
 
-The server now supports **true real-time streaming** using the Auggie SDK's session update callbacks:
+The server supports **true real-time streaming** using the Auggie SDK's session update callbacks with all 8 ACP protocol update types:
 
 ### Session Update Types
 
-| Update Type | Description |
-|-------------|-------------|
-| `agent_message_chunk` | Real-time text output (streamed as OpenAI content chunks) |
-| `agent_thought_chunk` | Thinking/reasoning status (streamed as `reasoning` field) |
-| `tool_call` | Tool execution started (logged to console) |
-| `tool_call_update` | Tool execution progress (logged to console) |
-| `plan` | Execution plan updates (logged to console) |
+| Update Type | Description | OpenAI Field |
+|-------------|-------------|--------------|
+| `user_message_chunk` | User message streaming | Console only |
+| `agent_message_chunk` | Real-time text output | `delta.content` |
+| `agent_thought_chunk` | Thinking/reasoning | `delta.reasoning_content` |
+| `tool_call` | Tool execution started | `delta.tool_calls[]` + `delta.tool_metadata` |
+| `tool_call_update` | Tool progress/results | `delta.tool_calls[]` + `delta.tool_metadata` |
+| `plan` | Execution plan | `delta.plan[]` |
+| `available_commands_update` | Available commands | `delta.available_commands[]` |
+| `current_mode_update` | Mode changes | `delta.current_mode` |
 
 ### Client Pooling
 
 The server maintains a pool of up to 5 clients per model to support parallel requests. When a request completes, the client is returned to the pool for reuse.
 
+## Error Handling & Retry
+
+### Automatic Retry
+
+The server automatically retries on transient errors with exponential backoff:
+
+| Configuration | Value |
+|---------------|-------|
+| Max retries | 3 |
+| Initial delay | 1000ms |
+| Max delay | 30000ms |
+| Backoff multiplier | 2x |
+| Jitter | ±10% |
+
+### Error Classification
+
+| Error Type | HTTP Status | Retry? |
+|------------|-------------|--------|
+| Rate limit | 429 | Yes |
+| Server error (5xx) | 500 | Yes |
+| Network timeout | 500 | Yes |
+| Context length exceeded | 400 | No |
+| Invalid API key | 401 | No |
+| Validation error | 400 | No |
+
+## Health & Metrics
+
+### Health Check Endpoint (`GET /health`)
+
+Returns detailed server status:
+
+```json
+{
+  "status": "ok",
+  "message": "Auggie Wrapper is running",
+  "timestamp": "2026-01-27T...",
+  "uptime": { "seconds": 3661, "formatted": "1h 1m 1s" },
+  "metrics": {
+    "totalRequests": 150,
+    "successfulRequests": 148,
+    "failedRequests": 2,
+    "activeRequests": 1,
+    "averageLatencyMs": 2500,
+    "successRate": "98.67%"
+  },
+  "models": { "available": [...], "default": "claude-opus-4.5" },
+  "memory": { "heapUsedMB": 45, "heapTotalMB": 80, "rssMB": 120 },
+  "config": { "requestTimeoutMs": 300000, "shutdownTimeoutMs": 30000, "poolSize": 5 }
+}
+```
+
+### Metrics Endpoint (`GET /metrics`)
+
+Returns raw request metrics for monitoring systems.
+
+## Graceful Shutdown
+
+The server handles SIGTERM/SIGINT signals gracefully:
+
+1. Stops accepting new connections
+2. Waits for active requests to complete (up to `SHUTDOWN_TIMEOUT_MS`)
+3. Cancels remaining requests if timeout reached
+4. Cleans up client pools
+5. Exits cleanly
+
 ## Known Limitations
 
-- **Token usage**: Not tracked (returns 0 for all token counts)
+- **Token usage**: Estimated (not exact from API)
 - **Function calling**: Not supported
-- **Tool use**: Not supported
+- **Tool use**: Not supported (but tool execution is streamed)
 - **Image/multimodal**: Not supported
 
 ## Troubleshooting
@@ -238,4 +309,3 @@ The server maintains a pool of up to 5 clients per model to support parallel req
 # Push changes (using specific SSH key)
 GIT_SSH_COMMAND="ssh -i ~/.ssh/hletrd-Github -o IdentitiesOnly=yes" git push origin main
 ```
-
