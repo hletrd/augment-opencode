@@ -298,6 +298,19 @@ function isContextLengthError(error: Error): boolean {
   );
 }
 
+function isSessionError(error: Error): boolean {
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('not connected') ||
+    message.includes('no session') ||
+    message.includes('initialization failed') ||
+    message.includes('session expired') ||
+    message.includes('session invalid') ||
+    message.includes('websocket') ||
+    message.includes('disconnected')
+  );
+}
+
 function isTransientError(error: Error): boolean {
   const message = error.message.toLowerCase();
   const augmentError = error as AugmentAPIError;
@@ -305,6 +318,9 @@ function isTransientError(error: Error): boolean {
 
   // 5xx server errors are transient
   if (statusCode >= 500 && statusCode < 600) return true;
+
+  // Session/connection errors from SDK are transient (can retry with new client)
+  if (isSessionError(error)) return true;
 
   // Network-related errors
   if (
@@ -358,6 +374,22 @@ function createOpenAIError(error: Error): OpenAIError {
         param: null,
         suggestion:
           'Wait a moment before retrying. Consider reducing request frequency or implementing exponential backoff.',
+      },
+    };
+  }
+
+  // Session/connection errors from SDK - provide specific guidance
+  if (isSessionError(error)) {
+    return {
+      error: {
+        message: `SDK session error: ${error.message}`,
+        type: 'server_error',
+        code: 'connection_error',
+        param: null,
+        suggestion:
+          'The Augment SDK connection was lost. This is usually temporary. ' +
+          'If the issue persists: 1) Run "auggie login" to refresh authentication, ' +
+          '2) Restart the server, 3) Check your network connection.',
       },
     };
   }
@@ -708,6 +740,22 @@ function releaseAuggieClient(modelId: string, client: AuggieClient): void {
       console.log(`Pool full, closed client for ${auggieModel}`);
     }
   }
+}
+
+// Discard a client without returning it to the pool (used when client has errors)
+function discardAuggieClient(modelId: string, client: AuggieClient): void {
+  const modelConfig = MODEL_MAP[modelId] ?? MODEL_MAP[DEFAULT_MODEL];
+  if (!modelConfig) return;
+  const auggieModel = modelConfig.auggie;
+  const pool = clientPools[auggieModel];
+  if (!pool) return;
+
+  if (pool.inUse.has(client)) {
+    pool.inUse.delete(client);
+  }
+  // Close the client without returning to pool
+  void client.close();
+  console.log(`Discarded faulty client for ${auggieModel} (session/connection error)`);
 }
 
 function getModels() {
@@ -1284,6 +1332,24 @@ function createStreamCallback(res: ServerResponse, model: string, requestId: str
   };
 }
 
+// Check if response is an SDK error (JSON with error field)
+function isSDKErrorResponse(response: string): { isError: boolean; message?: string } {
+  try {
+    const parsed = JSON.parse(response) as Record<string, unknown>;
+    const errorField = parsed['error'];
+    if (typeof errorField === 'string') {
+      return { isError: true, message: errorField };
+    }
+    if (errorField && typeof errorField === 'object') {
+      const errObj = errorField as Record<string, unknown>;
+      return { isError: true, message: (errObj['message'] as string) ?? String(errObj) };
+    }
+  } catch {
+    // Not JSON, so not an error response
+  }
+  return { isError: false };
+}
+
 async function callAugmentAPIStreamingInternal(
   prompt: string,
   modelId: string,
@@ -1293,11 +1359,30 @@ async function callAugmentAPIStreamingInternal(
 ): Promise<void> {
   const client = await getAuggieClient(modelId);
   client.onSessionUpdate(createStreamCallback(res, model, requestId));
+  let hasError = false;
+  let caughtError: Error | null = null;
   try {
-    await client.prompt(prompt);
+    const response = await client.prompt(prompt);
+    // Check if SDK returned an error as a response string (can happen even in streaming mode)
+    const errorCheck = isSDKErrorResponse(response);
+    if (errorCheck.isError) {
+      hasError = true;
+      caughtError = new Error(errorCheck.message ?? 'Unknown SDK error');
+    }
+  } catch (err) {
+    hasError = true;
+    caughtError = err as Error;
   } finally {
     client.onSessionUpdate(null);
-    releaseAuggieClient(modelId, client);
+    // Discard client on session errors, otherwise return to pool
+    if (hasError && caughtError && isSessionError(caughtError)) {
+      discardAuggieClient(modelId, client);
+    } else {
+      releaseAuggieClient(modelId, client);
+    }
+  }
+  if (caughtError) {
+    throw caughtError;
   }
 }
 
@@ -1317,11 +1402,34 @@ async function callAugmentAPIStreaming(
 
 async function callAugmentAPIInternal(prompt: string, modelId: string): Promise<string> {
   const client = await getAuggieClient(modelId);
+  let hasError = false;
+  let caughtError: Error | null = null;
+  let result = '';
   try {
-    return await client.prompt(prompt);
+    const response = await client.prompt(prompt);
+    // Check if SDK returned an error as a response string
+    const errorCheck = isSDKErrorResponse(response);
+    if (errorCheck.isError) {
+      hasError = true;
+      caughtError = new Error(errorCheck.message ?? 'Unknown SDK error');
+    } else {
+      result = response;
+    }
+  } catch (err) {
+    hasError = true;
+    caughtError = err as Error;
   } finally {
-    releaseAuggieClient(modelId, client);
+    // Discard client on session errors, otherwise return to pool
+    if (hasError && caughtError && isSessionError(caughtError)) {
+      discardAuggieClient(modelId, client);
+    } else {
+      releaseAuggieClient(modelId, client);
+    }
   }
+  if (caughtError) {
+    throw caughtError;
+  }
+  return result;
 }
 
 async function callAugmentAPI(prompt: string, modelId: string, requestId: string): Promise<string> {
