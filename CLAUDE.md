@@ -32,10 +32,15 @@ OpenCode/Client → HTTP Request → src/server.ts (builds to dist/server.js) �
   - `POST /v1/chat/completions` - Chat completions (streaming supported)
   - `GET /v1/models` - List available models
   - `GET /v1/models/{id}` - Get specific model
-  - `GET /health` or `GET /` - Health check
-- Maintains per-model Auggie SDK client cache (`auggieClients` object)
-- Streaming via Server-Sent Events (simulated - fetches complete response, then chunks)
+  - `GET /health` - Detailed health check with metrics
+  - `GET /version` - Server version and configuration info
+  - `GET /metrics` - Raw request metrics
+  - `GET /`, `/healthz`, `/ready` - Simple health check for load balancers
+- Maintains per-model Auggie SDK client pool (up to 5 clients per model)
+- True real-time streaming via Server-Sent Events with all ACP protocol update types
 - Authentication from `~/.augment/session.json`
+- Automatic retry with exponential backoff for transient errors
+- Graceful shutdown with connection draining
 
 ## Available Models
 

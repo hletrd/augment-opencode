@@ -208,6 +208,7 @@ All models are available simultaneously. Select the model in your API request:
 | `/v1/models` | GET | List available models |
 | `/v1/models/{id}` | GET | Get model details |
 | `/health` | GET | Detailed health check with metrics |
+| `/version` | GET | Server version and configuration info |
 | `/metrics` | GET | Raw request metrics (JSON) |
 | `/`, `/healthz`, `/ready` | GET | Simple health check for load balancers |
 

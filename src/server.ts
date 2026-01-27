@@ -248,6 +248,9 @@ type OpenAIErrorCode =
   | 'rate_limit_exceeded'
   | 'server_error'
   | 'invalid_api_key'
+  | 'model_not_found'
+  | 'request_timeout'
+  | 'connection_error'
   | null;
 
 interface OpenAIError {
@@ -256,6 +259,7 @@ interface OpenAIError {
     type: OpenAIErrorType;
     code: OpenAIErrorCode;
     param?: string | null;
+    suggestion?: string;
   };
 }
 
@@ -330,13 +334,17 @@ function isRetryableError(error: Error): boolean {
 }
 
 function createOpenAIError(error: Error): OpenAIError {
+  const errorMsg = error.message.toLowerCase();
+
   if (isContextLengthError(error)) {
     return {
       error: {
-        message: `Context length exceeded: ${error.message}. Please reduce the length of your messages.`,
+        message: `Context length exceeded: ${error.message}`,
         type: 'invalid_request_error',
         code: 'context_length_exceeded',
         param: 'messages',
+        suggestion:
+          'Reduce the number of messages, shorten message content, or use a model with larger context window.',
       },
     };
   }
@@ -344,10 +352,12 @@ function createOpenAIError(error: Error): OpenAIError {
   if (isRateLimitError(error)) {
     return {
       error: {
-        message: `Rate limit exceeded: ${error.message}. Please retry after a short delay.`,
+        message: `Rate limit exceeded: ${error.message}`,
         type: 'rate_limit_error',
         code: 'rate_limit_exceeded',
         param: null,
+        suggestion:
+          'Wait a moment before retrying. Consider reducing request frequency or implementing exponential backoff.',
       },
     };
   }
@@ -355,10 +365,76 @@ function createOpenAIError(error: Error): OpenAIError {
   if (isTransientError(error)) {
     return {
       error: {
-        message: `Server error: ${error.message}. Please retry your request.`,
+        message: `Server error: ${error.message}`,
         type: 'server_error',
         code: 'server_error',
         param: null,
+        suggestion: 'This is likely a temporary issue. Please retry your request in a few seconds.',
+      },
+    };
+  }
+
+  // Authentication errors
+  if (errorMsg.includes('unauthorized') || errorMsg.includes('invalid api key')) {
+    return {
+      error: {
+        message: `Authentication failed: ${error.message}`,
+        type: 'invalid_request_error',
+        code: 'invalid_api_key',
+        param: null,
+        suggestion:
+          'Run "auggie login" to authenticate with Augment Code, then restart the server.',
+      },
+    };
+  }
+
+  // Model not found
+  if (
+    errorMsg.includes('model') &&
+    (errorMsg.includes('not found') || errorMsg.includes('invalid'))
+  ) {
+    return {
+      error: {
+        message: `Invalid model: ${error.message}`,
+        type: 'invalid_request_error',
+        code: 'model_not_found',
+        param: 'model',
+        suggestion: `Use GET /v1/models to see available models. Default model: ${DEFAULT_MODEL}`,
+      },
+    };
+  }
+
+  // Timeout error
+  if (
+    errorMsg.includes('timeout') ||
+    errorMsg.includes('timed out') ||
+    error.name === 'AbortError'
+  ) {
+    return {
+      error: {
+        message: `Request timeout: ${error.message}`,
+        type: 'server_error',
+        code: 'request_timeout',
+        param: null,
+        suggestion:
+          'The request took too long to process. Try a shorter prompt or increase REQUEST_TIMEOUT_MS.',
+      },
+    };
+  }
+
+  // Connection errors
+  if (
+    errorMsg.includes('econnrefused') ||
+    errorMsg.includes('enotfound') ||
+    errorMsg.includes('network')
+  ) {
+    return {
+      error: {
+        message: `Connection error: ${error.message}`,
+        type: 'server_error',
+        code: 'connection_error',
+        param: null,
+        suggestion: 'Check your network connection and ensure the Augment Code API is reachable.',
       },
     };
   }
@@ -370,6 +446,7 @@ function createOpenAIError(error: Error): OpenAIError {
       type: 'api_error',
       code: null,
       param: null,
+      suggestion: 'Check the error message for details. If the issue persists, check server logs.',
     },
   };
 }
@@ -448,6 +525,96 @@ async function loadSession(): Promise<Session> {
     console.error('Please run "auggie login" first.');
     process.exit(1);
   }
+}
+
+// Validate session file exists and has required fields before starting server
+async function validateStartup(): Promise<void> {
+  const sessionPath = nodePath.join(os.homedir(), '.augment', 'session.json');
+
+  console.log('🔍 Validating startup configuration...');
+
+  // Check session file exists
+  try {
+    await fs.access(sessionPath);
+  } catch {
+    console.error(`
+╔════════════════════════════════════════════════════════════╗
+║  ERROR: Session file not found                             ║
+╠════════════════════════════════════════════════════════════╣
+║  Expected location: ${sessionPath.padEnd(39)}║
+║                                                            ║
+║  Please run "auggie login" to authenticate with            ║
+║  Augment Code before starting the server.                  ║
+╚════════════════════════════════════════════════════════════╝
+`);
+    process.exit(1);
+  }
+
+  // Validate session file contents
+  try {
+    const data = await fs.readFile(sessionPath, 'utf-8');
+    const sessionData = JSON.parse(data) as Record<string, unknown>;
+
+    const errors: string[] = [];
+
+    if (!sessionData['accessToken'] || typeof sessionData['accessToken'] !== 'string') {
+      errors.push('Missing or invalid "accessToken" field');
+    }
+
+    if (!sessionData['tenantURL'] || typeof sessionData['tenantURL'] !== 'string') {
+      errors.push('Missing or invalid "tenantURL" field');
+    }
+
+    if (errors.length > 0) {
+      console.error(`
+╔════════════════════════════════════════════════════════════╗
+║  ERROR: Invalid session file                               ║
+╠════════════════════════════════════════════════════════════╣
+${errors.map((e) => `║  • ${e.padEnd(57)}║`).join('\n')}
+║                                                            ║
+║  Please run "auggie login" to re-authenticate.             ║
+╚════════════════════════════════════════════════════════════╝
+`);
+      process.exit(1);
+    }
+
+    // Optionally validate token is not empty
+    if ((sessionData['accessToken'] as string).length < 10) {
+      console.error(`
+╔════════════════════════════════════════════════════════════╗
+║  WARNING: Access token appears to be invalid               ║
+╠════════════════════════════════════════════════════════════╣
+║  The access token is suspiciously short.                   ║
+║  Consider running "auggie login" again.                    ║
+╚════════════════════════════════════════════════════════════╝
+`);
+    }
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      console.error(`
+╔════════════════════════════════════════════════════════════╗
+║  ERROR: Session file is not valid JSON                     ║
+╠════════════════════════════════════════════════════════════╣
+║  The session file appears to be corrupted.                 ║
+║  Please run "auggie login" to re-authenticate.             ║
+╚════════════════════════════════════════════════════════════╝
+`);
+      process.exit(1);
+    }
+    throw err;
+  }
+
+  console.log('✅ Session file validated successfully');
+
+  // Validate models configuration
+  if (Object.keys(MODEL_MAP).length === 0) {
+    console.error('ERROR: No models configured in models.json');
+    process.exit(1);
+  }
+
+  console.log(`✅ ${String(Object.keys(MODEL_MAP).length)} models configured`);
+  console.log(`✅ Default model: ${DEFAULT_MODEL}`);
+  console.log('');
 }
 
 async function initAuggie(): Promise<void> {
@@ -1162,8 +1329,16 @@ async function callAugmentAPI(prompt: string, modelId: string, requestId: string
 }
 
 async function handleChatCompletions(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const requestId = randomUUID().slice(0, 8);
+  // Propagate X-Request-ID header from client or generate one
+  const clientRequestId = req.headers['x-request-id'];
+  const requestId =
+    typeof clientRequestId === 'string' && clientRequestId.length > 0
+      ? clientRequestId.slice(0, 36) // Limit length for safety
+      : randomUUID().slice(0, 8);
   const startTime = Date.now();
+
+  // Set request ID in response headers for tracing
+  res.setHeader('X-Request-ID', requestId);
 
   // Track active request
   metrics.totalRequests++;
@@ -1459,6 +1634,37 @@ function handleHealthSimple(_req: IncomingMessage, res: ServerResponse): void {
   }
 }
 
+// Version endpoint - returns server version and runtime info
+function handleVersion(_req: IncomingMessage, res: ServerResponse): void {
+  const version = {
+    name: 'auggie-wrapper',
+    version: modelsConfig.version,
+    description: 'OpenAI-compatible API proxy for Augment Code',
+    runtime: {
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+    },
+    api: {
+      openaiCompatible: true,
+      version: 'v1',
+      defaultModel: DEFAULT_MODEL,
+      availableModels: Object.keys(MODEL_MAP),
+    },
+    config: {
+      port: PORT,
+      requestTimeoutMs: REQUEST_TIMEOUT_MS,
+      shutdownTimeoutMs: SHUTDOWN_TIMEOUT_MS,
+      maxPoolSize: POOL_SIZE,
+      debug: DEBUG,
+    },
+    startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+  };
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(version, null, 2));
+}
+
 function setCorsHeaders(res: ServerResponse): void {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -1492,6 +1698,9 @@ const server = http.createServer((req, res) => {
   } else if (urlPath === '/' || urlPath === '/healthz' || urlPath === '/ready') {
     // Simple health check for load balancers
     handleHealthSimple(req, res);
+  } else if (urlPath === '/version') {
+    // Version endpoint
+    handleVersion(req, res);
   } else if (urlPath === '/metrics') {
     // Metrics endpoint
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1514,6 +1723,12 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ error: { message: 'Not found' } }));
   }
 });
+
+// Configure keep-alive for better performance
+// Keep connections alive for 60 seconds (default is 5 seconds in Node.js)
+server.keepAliveTimeout = 60000;
+// Ensure headers timeout is greater than keep-alive timeout
+server.headersTimeout = 65000;
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string): Promise<void> {
@@ -1586,9 +1801,14 @@ process.on('unhandledRejection', (reason) => {
   structuredLog('error', 'Process', 'Unhandled rejection', { data: reason });
 });
 
-server.listen(PORT, () => {
-  structuredLog('info', 'Startup', `Server started on port ${String(PORT)}`);
-  console.log(`
+// Start server with validation
+async function startServer(): Promise<void> {
+  // Validate configuration before starting
+  await validateStartup();
+
+  server.listen(PORT, () => {
+    structuredLog('info', 'Startup', `Server started on port ${String(PORT)}`);
+    console.log(`
 ╔════════════════════════════════════════════════════════════╗
 ║           Auggie Wrapper - OpenAI API Proxy                ║
 ╠════════════════════════════════════════════════════════════╣
@@ -1607,7 +1827,12 @@ ${Object.entries(MODEL_MAP)
 ║    POST /v1/chat/completions - Chat completions            ║
 ║    GET  /v1/models           - List models                 ║
 ║    GET  /health              - Detailed health check       ║
+║    GET  /version             - Server version info         ║
 ║    GET  /metrics             - Request metrics             ║
 ╚════════════════════════════════════════════════════════════╝
-  `);
-});
+    `);
+  });
+}
+
+// Start the server
+void startServer();

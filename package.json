@@ -1,6 +1,6 @@
 {
   "name": "auggie-wrapper",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "OpenAI-compatible API proxy that routes requests to Claude Opus via Auggie CLI (Augment Code)",
   "main": "dist/server.js",
   "type": "module",
