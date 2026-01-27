@@ -1125,10 +1125,15 @@ function createStreamCallback(res: ServerResponse, model: string, requestId: str
 
       case 'tool_call': {
         const toolId = update.toolCallId ?? `call_${randomUUID().slice(0, 8)}`;
-        const toolName = update.title ?? 'unknown_tool';
+        const toolTitle = update.title ?? 'unknown_tool';
         const toolKind = update.kind ?? 'other';
         const toolStatus = update.status ?? 'pending';
         const rawInput = update.rawInput;
+
+        // Use kind as the tool name since title contains human-readable descriptions
+        // like "Read `/path/to/file`" instead of just "read"
+        // This matches OpenAI's expected tool name format
+        const toolName = toolKind;
 
         // Track tool call index
         if (!toolCallIndices.has(toolId)) {
@@ -1140,7 +1145,7 @@ function createStreamCallback(res: ServerResponse, model: string, requestId: str
         const args = rawInput ? JSON.stringify(rawInput) : '';
 
         console.log(
-          `[${requestId}] 🔧 Tool[${String(toolIndex)}]: ${toolName} (${toolKind}) [${toolStatus}]` +
+          `[${requestId}] 🔧 Tool[${String(toolIndex)}]: ${toolName} (title: ${toolTitle}) [${toolStatus}]` +
             (args ? ` args=${args.substring(0, 100)}...` : '')
         );
 
@@ -1169,6 +1174,7 @@ function createStreamCallback(res: ServerResponse, model: string, requestId: str
                 // Include custom metadata for richer info
                 tool_metadata: {
                   kind: toolKind,
+                  title: toolTitle,
                   status: toolStatus,
                   locations: formatLocations(update.locations),
                 },
@@ -1186,9 +1192,13 @@ function createStreamCallback(res: ServerResponse, model: string, requestId: str
         const toolId = update.toolCallId ?? 'unknown';
         const toolStatus = update.status ?? 'in_progress';
         const toolTitle = update.title;
+        const toolKind = update.kind ?? 'other';
         const rawOutput = update.rawOutput;
         const toolContent = update.toolContent;
         const locations = update.locations;
+
+        // Use kind as the tool name (consistent with tool_call handling)
+        const toolName = toolKind;
 
         // Get or create tool index
         if (!toolCallIndices.has(toolId)) {
@@ -1202,7 +1212,7 @@ function createStreamCallback(res: ServerResponse, model: string, requestId: str
         const locationsText = formatLocations(locations);
 
         console.log(
-          `[${requestId}] 🔧 Tool[${String(toolIndex)}] Update: ${toolId} [${toolStatus}]` +
+          `[${requestId}] 🔧 Tool[${String(toolIndex)}] Update: ${toolName} [${toolStatus}]` +
             (toolTitle ? ` "${toolTitle}"` : '') +
             (locationsText ? ` @${locationsText}` : '') +
             (outputText ? ` output=${outputText.substring(0, 80)}...` : '')
@@ -1225,7 +1235,7 @@ function createStreamCallback(res: ServerResponse, model: string, requestId: str
                     id: toolId,
                     type: 'function',
                     function: {
-                      name: toolTitle ?? '',
+                      name: toolName,
                       // Stream output as additional arguments (result info)
                       arguments: outputText
                         ? JSON.stringify({ _result: outputText.substring(0, 500) })
@@ -1234,6 +1244,7 @@ function createStreamCallback(res: ServerResponse, model: string, requestId: str
                   },
                 ],
                 tool_metadata: {
+                  title: toolTitle,
                   status: toolStatus,
                   locations: locationsText,
                   has_content: contentText.length > 0,
