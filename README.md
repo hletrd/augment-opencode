@@ -1,8 +1,8 @@
-# Auggie Wrapper
+# Augment Code for OpenCode
 
-An OpenAI-compatible API proxy that routes requests to Claude models via Augment Code SDK.
+An OpenAI-compatible API proxy that routes requests to Augment Code backends via Augment Code SDK.
 
-This wrapper allows you to use [OpenCode](https://opencode.ai) or any other OpenAI-compatible client with Claude models (Opus 4.5, Sonnet 4.5, Sonnet 4, Haiku 4.5) through Augment Code's powerful context engine.
+This wrapper allows you to use [OpenCode](https://opencode.ai) or any other OpenAI-compatible client with Augment Code backends through Augment Code's powerful context engine.
 
 ## Prerequisites
 
