@@ -2,14 +2,17 @@
   "name": "auggie-wrapper",
   "version": "1.0.0",
   "description": "OpenAI-compatible API proxy that routes requests to Claude Opus via Auggie CLI (Augment Code)",
-  "main": "server.js",
+  "main": "dist/server.js",
   "type": "module",
   "bin": {
-    "auggie-wrapper": "./server.js"
+    "auggie-wrapper": "./dist/server.js"
   },
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "start:js": "node server.js",
+    "dev": "tsx watch src/server.ts",
+    "dev:build": "tsc --watch"
   },
   "keywords": [
     "auggie",
@@ -25,6 +28,13 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "@augmentcode/auggie-sdk": "^0.1.13"
+    "@augmentcode/auggie-sdk": "^0.1.13",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "@types/dotenv": "^6.1.1",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0"
   }
 }

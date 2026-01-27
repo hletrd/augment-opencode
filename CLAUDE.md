@@ -45,8 +45,11 @@ OpenCode/Client → HTTP Request → server.js → Auggie SDK → Augment Code A
 | `claude-sonnet-4.5` | `sonnet4.5` | 200K | 16K | Balanced performance |
 | `claude-sonnet-4` | `sonnet4` | 200K | 16K | Previous generation |
 | `claude-haiku-4.5` | `haiku4.5` | 200K | 8K | Fastest, lightweight |
+| `gpt-5` | `gpt5` | 128K | 16K | GPT-5 legacy |
+| `gpt-5.1` | `gpt5.1` | 128K | 16K | Strong reasoning and planning |
+| `gpt-5.2` | `gpt5.2` | 128K | 16K | Smarter, slower, more expensive |
 
-**Important**: Use OpenCode Model IDs (e.g., `claude-opus-4.5`) in API requests, not Auggie Model IDs.
+**Important**: Use OpenCode Model IDs (e.g., `claude-opus-4.5`, `gpt-5.1`) in API requests, not Auggie Model IDs.
 
 ## Commands
 
@@ -79,10 +82,15 @@ curl -X POST http://localhost:8765/v1/chat/completions \
 const DEFAULT_MODEL = 'claude-opus-4.5';
 
 const MODEL_MAP = {
+  // Claude models
   'claude-opus-4.5': { auggie: 'opus4.5', name: 'Claude Opus 4.5', context: 200000, output: 32000 },
   'claude-sonnet-4.5': { auggie: 'sonnet4.5', name: 'Claude Sonnet 4.5', context: 200000, output: 16000 },
   'claude-sonnet-4': { auggie: 'sonnet4', name: 'Claude Sonnet 4', context: 200000, output: 16000 },
   'claude-haiku-4.5': { auggie: 'haiku4.5', name: 'Claude Haiku 4.5', context: 200000, output: 8000 },
+  // GPT models
+  'gpt-5': { auggie: 'gpt5', name: 'GPT-5', context: 128000, output: 16000 },
+  'gpt-5.1': { auggie: 'gpt5.1', name: 'GPT-5.1', context: 128000, output: 16000 },
+  'gpt-5.2': { auggie: 'gpt5.2', name: 'GPT-5.2', context: 128000, output: 16000 },
 };
 ```
 
@@ -189,9 +197,26 @@ Provider uses `@ai-sdk/openai-compatible` npm package:
 4. Test each model with chat completion
 5. Verify streaming works: add `"stream": true` to request
 
+## Streaming & Real-time Updates
+
+The server now supports **true real-time streaming** using the Auggie SDK's session update callbacks:
+
+### Session Update Types
+
+| Update Type | Description |
+|-------------|-------------|
+| `agent_message_chunk` | Real-time text output (streamed as OpenAI content chunks) |
+| `agent_thought_chunk` | Thinking/reasoning status (streamed as `reasoning` field) |
+| `tool_call` | Tool execution started (logged to console) |
+| `tool_call_update` | Tool execution progress (logged to console) |
+| `plan` | Execution plan updates (logged to console) |
+
+### Client Pooling
+
+The server maintains a pool of up to 5 clients per model to support parallel requests. When a request completes, the client is returned to the pool for reuse.
+
 ## Known Limitations
 
-- **Streaming**: Simulated (response fetched completely, then chunked to client)
 - **Token usage**: Not tracked (returns 0 for all token counts)
 - **Function calling**: Not supported
 - **Tool use**: Not supported

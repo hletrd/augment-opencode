@@ -105,6 +105,18 @@ config.provider.augment = {
     'claude-haiku-4.5': {
       name: 'Claude Haiku 4.5 (Augment)',
       limit: { context: 200000, output: 8000 }
+    },
+    'gpt-5': {
+      name: 'GPT-5 (Augment)',
+      limit: { context: 128000, output: 16000 }
+    },
+    'gpt-5.1': {
+      name: 'GPT-5.1 (Augment)',
+      limit: { context: 128000, output: 16000 }
+    },
+    'gpt-5.2': {
+      name: 'GPT-5.2 (Augment)',
+      limit: { context: 128000, output: 16000 }
     }
   }
 };
@@ -142,6 +154,18 @@ else
         "claude-haiku-4.5": {
           "name": "Claude Haiku 4.5 (Augment)",
           "limit": { "context": 200000, "output": 8000 }
+        },
+        "gpt-5": {
+          "name": "GPT-5 (Augment)",
+          "limit": { "context": 128000, "output": 16000 }
+        },
+        "gpt-5.1": {
+          "name": "GPT-5.1 (Augment)",
+          "limit": { "context": 128000, "output": 16000 }
+        },
+        "gpt-5.2": {
+          "name": "GPT-5.2 (Augment)",
+          "limit": { "context": 128000, "output": 16000 }
         }
       }
     }
@@ -161,10 +185,15 @@ echo -e "  cd $SCRIPT_DIR"
 echo -e "  npm start"
 echo ""
 echo -e "${BLUE}Available models in OpenCode:${NC}"
+echo -e "  Claude models:"
 echo -e "  - augment/claude-opus-4.5     (default, recommended)"
 echo -e "  - augment/claude-sonnet-4.5"
 echo -e "  - augment/claude-sonnet-4"
 echo -e "  - augment/claude-haiku-4.5"
+echo -e "  GPT models:"
+echo -e "  - augment/gpt-5"
+echo -e "  - augment/gpt-5.1"
+echo -e "  - augment/gpt-5.2"
 echo ""
 echo -e "${BLUE}To use with OpenCode:${NC}"
 echo -e "  1. Start the server (npm start)"
