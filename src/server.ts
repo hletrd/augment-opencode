@@ -155,7 +155,7 @@ const PORT = process.env['PORT'] ?? 8765;
 const DEBUG = process.env['DEBUG'] === 'true' || process.env['DEBUG'] === '1';
 const DEFAULT_MODEL = modelsConfig.defaultModel;
 const POOL_SIZE = 5;
-const REQUEST_TIMEOUT_MS = parseInt(process.env['REQUEST_TIMEOUT_MS'] ?? '300000', 10); // 5 minutes default
+const REQUEST_TIMEOUT_MS = parseInt(process.env['REQUEST_TIMEOUT_MS'] ?? '3600000', 10); // 1 hour default
 const SHUTDOWN_TIMEOUT_MS = parseInt(process.env['SHUTDOWN_TIMEOUT_MS'] ?? '30000', 10); // 30 seconds default
 
 // Server start time for uptime tracking
@@ -743,7 +743,7 @@ function releaseAuggieClient(modelId: string, client: AuggieClient): void {
 }
 
 // Discard a client without returning it to the pool (used when client has errors)
-function discardAuggieClient(modelId: string, client: AuggieClient): void {
+function discardAuggieClient(modelId: string, client: AuggieClient, reason?: string): void {
   const modelConfig = MODEL_MAP[modelId] ?? MODEL_MAP[DEFAULT_MODEL];
   if (!modelConfig) return;
   const auggieModel = modelConfig.auggie;
@@ -755,7 +755,7 @@ function discardAuggieClient(modelId: string, client: AuggieClient): void {
   }
   // Close the client without returning to pool
   void client.close();
-  console.log(`Discarded faulty client for ${auggieModel} (session/connection error)`);
+  console.log(`Discarded faulty client for ${auggieModel} (${reason ?? 'unknown reason'})`);
 }
 
 function getModels() {
@@ -1063,10 +1063,23 @@ function createStreamCallback(res: ServerResponse, model: string, requestId: str
   toolCallIndices.clear();
   toolCallCounter = 0;
 
+  // Track chunks received for diagnostics
+  let chunkCount = 0;
+  let lastChunkTime = Date.now();
+
   return (notification: SessionNotification): void => {
     const update = notification.update;
     const sessionId = notification.sessionId ?? requestId;
     const timestamp = Math.floor(Date.now() / 1000);
+    const now = Date.now();
+    const timeSinceLastChunk = now - lastChunkTime;
+    lastChunkTime = now;
+    chunkCount++;
+
+    // Log chunk receipt for diagnostics (only every 10 chunks to reduce noise)
+    if (chunkCount === 1 || chunkCount % 10 === 0) {
+      console.log(`[${requestId}] 📦 Chunk #${String(chunkCount)} (${update.sessionUpdate}) +${String(timeSinceLastChunk)}ms`);
+    }
 
     debugLog(`Stream Update [${requestId}]`, {
       sessionId,
@@ -1082,9 +1095,10 @@ function createStreamCallback(res: ServerResponse, model: string, requestId: str
 
     switch (update.sessionUpdate) {
       case 'user_message_chunk':
-        // Echo user message chunks (useful for multi-turn visibility)
-        if (update.content?.type === 'text' && update.content.text) {
-          console.log(`[${requestId}] 👤 User: ${update.content.text.substring(0, 50)}...`);
+        // SDK echoes user input back - only log in debug mode to reduce noise
+        // Do NOT stream this to client - it would cause prompt leakage
+        if (DEBUG && update.content?.type === 'text' && update.content.text) {
+          console.log(`[${requestId}] 👤 User echo (ignored): ${update.content.text.substring(0, 50)}...`);
         }
         break;
 
@@ -1240,14 +1254,39 @@ async function callAugmentAPIStreamingInternal(
   modelId: string,
   res: ServerResponse,
   requestId: string,
-  model: string
+  model: string,
+  abortSignal?: AbortSignal
 ): Promise<void> {
+  const startTime = Date.now();
+  console.log(`[${requestId}] 🚀 Starting streaming call to ${modelId} (prompt: ${String(prompt.length)} chars)`);
+
   const client = await getAuggieClient(modelId);
   client.onSessionUpdate(createStreamCallback(res, model, requestId));
   let hasError = false;
   let caughtError: Error | null = null;
+
+  // Create a promise that rejects when abort signal fires
+  const abortPromise = abortSignal
+    ? new Promise<never>((_, reject) => {
+        if (abortSignal.aborted) {
+          reject(new Error('Request aborted'));
+          return;
+        }
+        abortSignal.addEventListener('abort', () => {
+          reject(new Error('Request aborted'));
+        });
+      })
+    : null;
+
   try {
-    const response = await client.prompt(prompt);
+    // Race between the actual prompt and abort signal
+    console.log(`[${requestId}] 📤 Sending prompt to SDK...`);
+    const promptPromise = client.prompt(prompt);
+    const response = abortPromise
+      ? await Promise.race([promptPromise, abortPromise])
+      : await promptPromise;
+    console.log(`[${requestId}] ✅ SDK call completed in ${String(Date.now() - startTime)}ms`);
+
     // Check if SDK returned an error as a response string (can happen even in streaming mode)
     const errorCheck = isSDKErrorResponse(response);
     if (errorCheck.isError) {
@@ -1259,9 +1298,16 @@ async function callAugmentAPIStreamingInternal(
     caughtError = err as Error;
   } finally {
     client.onSessionUpdate(null);
-    // Discard client on session errors, otherwise return to pool
-    if (hasError && caughtError && isSessionError(caughtError)) {
-      discardAuggieClient(modelId, client);
+    // Discard client on session errors or aborts, otherwise return to pool
+    if (hasError && caughtError) {
+      if (caughtError.message === 'Request aborted') {
+        discardAuggieClient(modelId, client, 'request aborted/timeout');
+      } else if (isSessionError(caughtError)) {
+        discardAuggieClient(modelId, client, 'session/connection error');
+      } else {
+        // Other errors - still return client to pool
+        releaseAuggieClient(modelId, client);
+      }
     } else {
       releaseAuggieClient(modelId, client);
     }
@@ -1276,22 +1322,46 @@ async function callAugmentAPIStreaming(
   modelId: string,
   res: ServerResponse,
   requestId: string,
-  model: string
+  model: string,
+  abortSignal?: AbortSignal
 ): Promise<void> {
   await withRetry(
-    () => callAugmentAPIStreamingInternal(prompt, modelId, res, requestId, model),
+    () => callAugmentAPIStreamingInternal(prompt, modelId, res, requestId, model, abortSignal),
     'Augment API Streaming',
     requestId
   );
 }
 
-async function callAugmentAPIInternal(prompt: string, modelId: string): Promise<string> {
+async function callAugmentAPIInternal(
+  prompt: string,
+  modelId: string,
+  abortSignal?: AbortSignal
+): Promise<string> {
   const client = await getAuggieClient(modelId);
   let hasError = false;
   let caughtError: Error | null = null;
   let result = '';
+
+  // Create a promise that rejects when abort signal fires
+  const abortPromise = abortSignal
+    ? new Promise<never>((_, reject) => {
+        if (abortSignal.aborted) {
+          reject(new Error('Request aborted'));
+          return;
+        }
+        abortSignal.addEventListener('abort', () => {
+          reject(new Error('Request aborted'));
+        });
+      })
+    : null;
+
   try {
-    const response = await client.prompt(prompt);
+    // Race between the actual prompt and abort signal
+    const promptPromise = client.prompt(prompt);
+    const response = abortPromise
+      ? await Promise.race([promptPromise, abortPromise])
+      : await promptPromise;
+
     // Check if SDK returned an error as a response string
     const errorCheck = isSDKErrorResponse(response);
     if (errorCheck.isError) {
@@ -1304,9 +1374,16 @@ async function callAugmentAPIInternal(prompt: string, modelId: string): Promise<
     hasError = true;
     caughtError = err as Error;
   } finally {
-    // Discard client on session errors, otherwise return to pool
-    if (hasError && caughtError && isSessionError(caughtError)) {
-      discardAuggieClient(modelId, client);
+    // Discard client on session errors or aborts, otherwise return to pool
+    if (hasError && caughtError) {
+      if (caughtError.message === 'Request aborted') {
+        discardAuggieClient(modelId, client, 'request aborted/timeout');
+      } else if (isSessionError(caughtError)) {
+        discardAuggieClient(modelId, client, 'session/connection error');
+      } else {
+        // Other errors - still return client to pool
+        releaseAuggieClient(modelId, client);
+      }
     } else {
       releaseAuggieClient(modelId, client);
     }
@@ -1317,8 +1394,17 @@ async function callAugmentAPIInternal(prompt: string, modelId: string): Promise<
   return result;
 }
 
-async function callAugmentAPI(prompt: string, modelId: string, requestId: string): Promise<string> {
-  return withRetry(() => callAugmentAPIInternal(prompt, modelId), 'Augment API', requestId);
+async function callAugmentAPI(
+  prompt: string,
+  modelId: string,
+  requestId: string,
+  abortSignal?: AbortSignal
+): Promise<string> {
+  return withRetry(
+    () => callAugmentAPIInternal(prompt, modelId, abortSignal),
+    'Augment API',
+    requestId
+  );
 }
 
 async function handleChatCompletions(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -1341,7 +1427,13 @@ async function handleChatCompletions(req: IncomingMessage, res: ServerResponse):
   const abortController = new AbortController();
   activeRequests.set(requestId, abortController);
 
-  // Set up request timeout
+  // Set up request timeout with warning
+  const TIMEOUT_WARNING_MS = Math.min(REQUEST_TIMEOUT_MS * 0.8, REQUEST_TIMEOUT_MS - 30000); // Warn at 80% or 30s before
+  const warningTimeoutId = setTimeout(() => {
+    const elapsed = Date.now() - startTime;
+    console.warn(`[WARN] [${requestId}] Request approaching timeout (elapsed: ${String(elapsed)}ms, timeout: ${String(REQUEST_TIMEOUT_MS)}ms)`);
+  }, TIMEOUT_WARNING_MS);
+
   const timeoutId = setTimeout(() => {
     structuredLog('warn', 'Request', 'Request timeout', {
       requestId,
@@ -1359,6 +1451,7 @@ async function handleChatCompletions(req: IncomingMessage, res: ServerResponse):
   });
 
   const cleanup = (success: boolean, errorType?: string) => {
+    clearTimeout(warningTimeoutId);
     clearTimeout(timeoutId);
     activeRequests.delete(requestId);
     metrics.activeRequests--;
@@ -1440,7 +1533,7 @@ async function handleChatCompletions(req: IncomingMessage, res: ServerResponse):
       res.flushHeaders();
 
       try {
-        await callAugmentAPIStreaming(prompt, model, res, requestId, model);
+        await callAugmentAPIStreaming(prompt, model, res, requestId, model, abortController.signal);
         res.write(createStreamChunk('', model, true));
         res.write('data: [DONE]\n\n');
         cleanup(true);
@@ -1454,7 +1547,7 @@ async function handleChatCompletions(req: IncomingMessage, res: ServerResponse):
       }
       res.end();
     } else {
-      const response = await callAugmentAPI(prompt, model, requestId);
+      const response = await callAugmentAPI(prompt, model, requestId, abortController.signal);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(createChatResponse(response, model, prompt)));
       cleanup(true);
