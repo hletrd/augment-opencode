@@ -285,6 +285,12 @@ npm start
 
 Check the server logs. If you see "Unknown model" warnings, ensure you're using the correct model ID (e.g., `claude-opus-4.5`, not `opus4.5`).
 
+## Documentation
+
+- **[AGENTS.md](AGENTS.md)** - Comprehensive documentation for AI assistants, including architecture, models, commands, and development guidelines
+- **[CLAUDE.md](CLAUDE.md)** - Detailed guidance for Claude Code when working with this repository
+- **[THINKING_PROGRESS_FIX.md](THINKING_PROGRESS_FIX.md)** - Documentation of the reasoning buffer implementation for proper streaming order
+
 ## License
 
 MIT
