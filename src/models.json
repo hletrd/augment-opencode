@@ -1,6 +1,6 @@
 {
   "version": "1.1.0",
-  "defaultModel": "gpt-5.2",
+  "defaultModel": "claude-opus-4.6",
   "models": {
     "claude-opus-4.6": {
       "auggie": "opus4.6",
