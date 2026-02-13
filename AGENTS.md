@@ -48,14 +48,14 @@ OpenCode/Client → HTTP (localhost:8765) → server.ts → Auggie SDK → Augme
 
 | Model ID | Backend | Context | Output | Use Case |
 |----------|---------|---------|--------|----------|
-| `claude-opus-4.6` | Augment | 200K | 32K | Default, most capable |
-| `claude-opus-4.5` | Augment | 200K | 32K | Previous Opus generation |
-| `claude-sonnet-4.5` | Augment | 200K | 16K | Balanced performance |
+| `claude-opus-4-6` | Augment | 200K | 32K | Default, most capable |
+| `claude-opus-4-5` | Augment | 200K | 32K | Previous Opus generation |
+| `claude-sonnet-4-5` | Augment | 200K | 16K | Balanced performance |
 | `claude-sonnet-4` | Augment | 200K | 16K | Previous generation |
-| `claude-haiku-4.5` | Augment | 200K | 8K | Fastest, lightweight |
+| `claude-haiku-4-5` | Augment | 200K | 8K | Fastest, lightweight |
 | `gpt-5` | Augment | 128K | 16K | GPT-5 legacy |
-| `gpt-5.1` | Augment | 128K | 16K | Strong reasoning |
-| `gpt-5.2` | Augment | 128K | 16K | Smarter, slower |
+| `gpt-5-1` | Augment | 128K | 16K | Strong reasoning |
+| `gpt-5-2` | Augment | 128K | 16K | Smarter, slower |
 
 ## Key Files
 

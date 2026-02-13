@@ -46,16 +46,16 @@ OpenCode/Client → HTTP Request → src/server.ts (builds to dist/server.js) �
 
 | OpenCode Model ID | Auggie Model ID | Context | Output | Description |
 |-------------------|-----------------|---------|--------|-------------|
-| `claude-opus-4.6` | `opus4.6` | 200K | 32K | **Default**, most capable |
-| `claude-opus-4.5` | `opus4.5` | 200K | 32K | Previous Opus generation |
-| `claude-sonnet-4.5` | `sonnet4.5` | 200K | 16K | Balanced performance |
+| `claude-opus-4-6` | `opus4.6` | 200K | 32K | **Default**, most capable |
+| `claude-opus-4-5` | `opus4.5` | 200K | 32K | Previous Opus generation |
+| `claude-sonnet-4-5` | `sonnet4.5` | 200K | 16K | Balanced performance |
 | `claude-sonnet-4` | `sonnet4` | 200K | 16K | Previous generation |
-| `claude-haiku-4.5` | `haiku4.5` | 200K | 8K | Fastest, lightweight |
+| `claude-haiku-4-5` | `haiku4.5` | 200K | 8K | Fastest, lightweight |
 | `gpt-5` | `gpt5` | 128K | 16K | GPT-5 legacy |
-| `gpt-5.1` | `gpt5.1` | 128K | 16K | Strong reasoning and planning |
-| `gpt-5.2` | `gpt5.2` | 128K | 16K | Smarter, slower, more expensive |
+| `gpt-5-1` | `gpt5.1` | 128K | 16K | Strong reasoning and planning |
+| `gpt-5-2` | `gpt5.2` | 128K | 16K | Smarter, slower, more expensive |
 
-**Important**: Use OpenCode Model IDs (e.g., `claude-opus-4.5`, `gpt-5.1`) in API requests, not Auggie Model IDs.
+**Important**: Use OpenCode Model IDs (e.g., `claude-opus-4-5`, `gpt-5-1`) in API requests, not Auggie Model IDs.
 
 ## Commands
 
@@ -77,7 +77,7 @@ curl http://localhost:8765/health
 curl http://localhost:8765/v1/models
 curl -X POST http://localhost:8765/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model": "claude-opus-4.5", "messages": [{"role": "user", "content": "Hello"}]}'
+  -d '{"model": "claude-opus-4-5", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
 
 ## Code Patterns
@@ -85,19 +85,19 @@ curl -X POST http://localhost:8765/v1/chat/completions \
 ### Model Mapping (src/server.ts)
 
 ```javascript
-const DEFAULT_MODEL = 'claude-opus-4.6';
+const DEFAULT_MODEL = 'claude-opus-4-6';
 
 const MODEL_MAP = {
   // Claude models
-  'claude-opus-4.6': { auggie: 'opus4.6', name: 'Claude Opus 4.6', context: 200000, output: 32000 },
-  'claude-opus-4.5': { auggie: 'opus4.5', name: 'Claude Opus 4.5', context: 200000, output: 32000 },
-  'claude-sonnet-4.5': { auggie: 'sonnet4.5', name: 'Claude Sonnet 4.5', context: 200000, output: 16000 },
+  'claude-opus-4-6': { auggie: 'opus4.6', name: 'Claude Opus 4.6', context: 200000, output: 32000 },
+  'claude-opus-4-5': { auggie: 'opus4.5', name: 'Claude Opus 4.5', context: 200000, output: 32000 },
+  'claude-sonnet-4-5': { auggie: 'sonnet4.5', name: 'Claude Sonnet 4.5', context: 200000, output: 16000 },
   'claude-sonnet-4': { auggie: 'sonnet4', name: 'Claude Sonnet 4', context: 200000, output: 16000 },
-  'claude-haiku-4.5': { auggie: 'haiku4.5', name: 'Claude Haiku 4.5', context: 200000, output: 8000 },
+  'claude-haiku-4-5': { auggie: 'haiku4.5', name: 'Claude Haiku 4.5', context: 200000, output: 8000 },
   // GPT models
   'gpt-5': { auggie: 'gpt5', name: 'GPT-5', context: 128000, output: 16000 },
-  'gpt-5.1': { auggie: 'gpt5.1', name: 'GPT-5.1', context: 128000, output: 16000 },
-  'gpt-5.2': { auggie: 'gpt5.2', name: 'GPT-5.2', context: 128000, output: 16000 },
+  'gpt-5-1': { auggie: 'gpt5.1', name: 'GPT-5.1', context: 128000, output: 16000 },
+  'gpt-5-2': { auggie: 'gpt5.2', name: 'GPT-5.2', context: 128000, output: 16000 },
 };
 ```
 
@@ -163,7 +163,7 @@ Provider uses `@ai-sdk/openai-compatible` npm package:
       "name": "Augment Code",
       "options": { "baseURL": "http://localhost:8765/v1" },
       "models": {
-        "claude-opus-4.6": { "name": "Claude Opus 4.6 (Augment)", "limit": { "context": 200000, "output": 32000 } }
+        "claude-opus-4-6": { "name": "Claude Opus 4.6 (Augment)", "limit": { "context": 200000, "output": 32000 } }
       }
     }
   }
@@ -273,7 +273,7 @@ Returns detailed server status:
     "averageLatencyMs": 2500,
     "successRate": "98.67%"
   },
-  "models": { "available": [...], "default": "claude-opus-4.5" },
+  "models": { "available": [...], "default": "claude-opus-4-6" },
   "memory": { "heapUsedMB": 45, "heapTotalMB": 80, "rssMB": 120 },
   "config": { "requestTimeoutMs": 300000, "shutdownTimeoutMs": 30000, "poolSize": 5 }
 }
@@ -307,7 +307,7 @@ The server handles SIGTERM/SIGINT signals gracefully:
 | "Please run auggie login first" | Run `auggie login` to authenticate |
 | Server not responding | Ensure server is running with `npm start` |
 | Model not in OpenCode | Check `~/.config/opencode/opencode.json` has augment-code provider |
-| "Unknown model" warning | Use correct model ID (e.g., `claude-opus-4.5`, not `opus4.5`) |
+| "Unknown model" warning | Use correct model ID (e.g., `claude-opus-4-5`, not `opus4.5`) |
 | Port already in use | Change port with `PORT=8766 npm start` |
 
 ## Git Workflow

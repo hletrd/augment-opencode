@@ -90,15 +90,15 @@ if (!config.provider) {
      baseURL: 'http://localhost:8765/v1'
    },
   models: {
-    'claude-opus-4.6': {
+    'claude-opus-4-6': {
       name: 'Claude Opus 4.6 (Augment)',
       limit: { context: 200000, output: 32000 }
     },
-    'claude-opus-4.5': {
+    'claude-opus-4-5': {
       name: 'Claude Opus 4.5 (Augment)',
       limit: { context: 200000, output: 32000 }
     },
-    'claude-sonnet-4.5': {
+    'claude-sonnet-4-5': {
       name: 'Claude Sonnet 4.5 (Augment)',
       limit: { context: 200000, output: 16000 }
     },
@@ -106,7 +106,7 @@ if (!config.provider) {
       name: 'Claude Sonnet 4 (Augment)',
       limit: { context: 200000, output: 16000 }
     },
-    'claude-haiku-4.5': {
+    'claude-haiku-4-5': {
       name: 'Claude Haiku 4.5 (Augment)',
       limit: { context: 200000, output: 8000 }
     },
@@ -114,11 +114,11 @@ if (!config.provider) {
       name: 'GPT-5 (Augment)',
       limit: { context: 128000, output: 16000 }
     },
-    'gpt-5.1': {
+    'gpt-5-1': {
       name: 'GPT-5.1 (Augment)',
       limit: { context: 128000, output: 16000 }
     },
-    'gpt-5.2': {
+    'gpt-5-2': {
       name: 'GPT-5.2 (Augment)',
       limit: { context: 128000, output: 16000 }
     }
@@ -143,15 +143,15 @@ else
         "baseURL": "http://localhost:8765/v1"
       },
       "models": {
-        "claude-opus-4.6": {
+        "claude-opus-4-6": {
           "name": "Claude Opus 4.6 (Augment)",
           "limit": { "context": 200000, "output": 32000 }
         },
-        "claude-opus-4.5": {
+        "claude-opus-4-5": {
           "name": "Claude Opus 4.5 (Augment)",
           "limit": { "context": 200000, "output": 32000 }
         },
-        "claude-sonnet-4.5": {
+        "claude-sonnet-4-5": {
           "name": "Claude Sonnet 4.5 (Augment)",
           "limit": { "context": 200000, "output": 16000 }
         },
@@ -159,7 +159,7 @@ else
           "name": "Claude Sonnet 4 (Augment)",
           "limit": { "context": 200000, "output": 16000 }
         },
-        "claude-haiku-4.5": {
+        "claude-haiku-4-5": {
           "name": "Claude Haiku 4.5 (Augment)",
           "limit": { "context": 200000, "output": 8000 }
         },
@@ -167,11 +167,11 @@ else
           "name": "GPT-5 (Augment)",
           "limit": { "context": 128000, "output": 16000 }
         },
-        "gpt-5.1": {
+        "gpt-5-1": {
           "name": "GPT-5.1 (Augment)",
           "limit": { "context": 128000, "output": 16000 }
         },
-        "gpt-5.2": {
+        "gpt-5-2": {
           "name": "GPT-5.2 (Augment)",
           "limit": { "context": 128000, "output": 16000 }
         }
@@ -194,15 +194,15 @@ echo -e "  npm start"
 echo ""
 echo -e "${BLUE}Available models in OpenCode:${NC}"
 echo -e "  Claude models:"
-echo -e "  - augment-code/claude-opus-4.6     (default, recommended)"
-echo -e "  - augment-code/claude-opus-4.5"
-echo -e "  - augment-code/claude-sonnet-4.5"
+echo -e "  - augment-code/claude-opus-4-6     (default, recommended)"
+echo -e "  - augment-code/claude-opus-4-5"
+echo -e "  - augment-code/claude-sonnet-4-5"
 echo -e "  - augment-code/claude-sonnet-4"
-echo -e "  - augment-code/claude-haiku-4.5"
+echo -e "  - augment-code/claude-haiku-4-5"
 echo -e "  GPT models:"
 echo -e "  - augment-code/gpt-5"
-echo -e "  - augment-code/gpt-5.1"
-echo -e "  - augment-code/gpt-5.2"
+echo -e "  - augment-code/gpt-5-1"
+echo -e "  - augment-code/gpt-5-2"
 echo ""
 echo -e "${BLUE}To use with OpenCode:${NC}"
 echo -e "  1. Start the server (npm start)"

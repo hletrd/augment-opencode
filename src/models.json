@@ -1,20 +1,20 @@
 {
   "version": "1.1.0",
-  "defaultModel": "claude-opus-4.6",
+  "defaultModel": "claude-opus-4-6",
   "models": {
-    "claude-opus-4.6": {
+    "claude-opus-4-6": {
       "auggie": "opus4.6",
       "name": "Claude Opus 4.6",
       "context": 200000,
       "output": 32000
     },
-    "claude-opus-4.5": {
+    "claude-opus-4-5": {
       "auggie": "opus4.5",
       "name": "Claude Opus 4.5",
       "context": 200000,
       "output": 32000
     },
-    "claude-sonnet-4.5": {
+    "claude-sonnet-4-5": {
       "auggie": "sonnet4.5",
       "name": "Claude Sonnet 4.5",
       "context": 200000,
@@ -26,7 +26,7 @@
       "context": 200000,
       "output": 16000
     },
-    "claude-haiku-4.5": {
+    "claude-haiku-4-5": {
       "auggie": "haiku4.5",
       "name": "Claude Haiku 4.5",
       "context": 200000,
@@ -38,13 +38,13 @@
       "context": 128000,
       "output": 16000
     },
-    "gpt-5.1": {
+    "gpt-5-1": {
       "auggie": "gpt5.1",
       "name": "GPT-5.1",
       "context": 128000,
       "output": 16000
     },
-    "gpt-5.2": {
+    "gpt-5-2": {
       "auggie": "gpt5.2",
       "name": "GPT-5.2",
       "context": 128000,
