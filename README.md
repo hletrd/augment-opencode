@@ -80,7 +80,7 @@ Add the following to your OpenCode config file at `~/.config/opencode/opencode.j
 {
   "$schema": "https://opencode.ai/config.json",
   "provider": {
-    "augment": {
+    "augment-code": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "Augment Code",
       "options": {
@@ -113,7 +113,7 @@ Add the following to your OpenCode config file at `~/.config/opencode/opencode.j
 }
 ```
 
-If you already have an `opencode.json` file, merge the `augment` provider into your existing `provider` section.
+If you already have an `opencode.json` file, merge the `augment-code` provider into your existing `provider` section.
 
 ### Using with OpenCode
 
@@ -130,7 +130,7 @@ If you already have an `opencode.json` file, merge the `augment` provider into y
    /models
    ```
 
-3. **Select any `augment/*` model** (e.g., `augment/claude-opus-4.5`)
+3. **Select any `augment-code/*` model** (e.g., `augment-code/claude-opus-4.5`)
 
 ## Usage
 
@@ -283,8 +283,8 @@ npm start
 ### Model not appearing in OpenCode
 
 1. Ensure the wrapper server is running
-2. Check that `~/.config/opencode/opencode.json` contains the `augment` provider configuration
-3. Run `/models` in OpenCode and look for `augment/claude-opus-4.6` (or other models)
+2. Check that `~/.config/opencode/opencode.json` contains the `augment-code` provider configuration
+3. Run `/models` in OpenCode and look for `augment-code/claude-opus-4.6` (or other models)
 
 ### Wrong model being used
 
@@ -299,4 +299,3 @@ Check the server logs. If you see "Unknown model" warnings, ensure you're using 
 ## License
 
 MIT
-

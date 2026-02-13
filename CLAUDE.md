@@ -158,7 +158,7 @@ Provider uses `@ai-sdk/openai-compatible` npm package:
 ```json
 {
   "provider": {
-    "augment": {
+    "augment-code": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "Augment Code",
       "options": { "baseURL": "http://localhost:8765/v1" },
@@ -306,7 +306,7 @@ The server handles SIGTERM/SIGINT signals gracefully:
 |-------|----------|
 | "Please run auggie login first" | Run `auggie login` to authenticate |
 | Server not responding | Ensure server is running with `npm start` |
-| Model not in OpenCode | Check `~/.config/opencode/opencode.json` has augment provider |
+| Model not in OpenCode | Check `~/.config/opencode/opencode.json` has augment-code provider |
 | "Unknown model" warning | Use correct model ID (e.g., `claude-opus-4.5`, not `opus4.5`) |
 | Port already in use | Change port with `PORT=8766 npm start` |
 
