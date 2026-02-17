@@ -663,8 +663,8 @@ async function createAuggieClient(auggieModel: string, workspaceRoot?: string): 
     throw new Error('Auggie SDK not initialized');
   }
   const sess = await loadSession();
-  // Use provided workspace or fall back to home directory
-  const workspace = workspaceRoot ?? os.homedir();
+  // Use provided workspace or fall back to server's working directory
+  const workspace = workspaceRoot ?? process.cwd();
   debugLog('Creating Auggie Client', { model: auggieModel, apiUrl: sess.tenantURL, workspaceRoot: workspace });
   const client = await AuggieClass.create({
     model: auggieModel,
@@ -679,7 +679,7 @@ async function createAuggieClient(auggieModel: string, workspaceRoot?: string): 
 
 // Generate pool key combining model and workspace
 function getPoolKey(auggieModel: string, workspaceRoot?: string): string {
-  const workspace = workspaceRoot ?? os.homedir();
+  const workspace = workspaceRoot ?? process.cwd();
   return `${auggieModel}:${workspace}`;
 }
 
@@ -694,7 +694,7 @@ async function getAuggieClient(modelId: string, workspaceRoot?: string): Promise
     requestedModel: modelId,
     resolvedAuggieModel: auggieModel,
     usingDefault: !MODEL_MAP[modelId],
-    workspaceRoot: workspaceRoot ?? os.homedir(),
+    workspaceRoot: workspaceRoot ?? process.cwd(),
     poolKey,
   });
 

@@ -179,7 +179,7 @@ async function createAuggieClient(
   await initAuggie();
   if (!AuggieClass) throw new Error("Auggie SDK not initialized");
   const sess = await loadSession();
-  const workspace = workspaceRoot ?? os.homedir();
+  const workspace = workspaceRoot ?? process.cwd();
   debug(
     `${LOG_PREFIX} Creating client for ${auggieModel} (workspace: ${workspace})`
   );
@@ -193,7 +193,7 @@ async function createAuggieClient(
 }
 
 function getPoolKey(auggieModel: string, workspaceRoot?: string): string {
-  return `${auggieModel}:${workspaceRoot ?? os.homedir()}`;
+  return `${auggieModel}:${workspaceRoot ?? process.cwd()}`;
 }
 
 async function getAuggieClient(
