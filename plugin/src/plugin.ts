@@ -13,8 +13,6 @@ const PROVIDER_ID = "augment";
 
 const LOG_PREFIX = "[augment]";
 const isDebug = () =>
-  process.env.DEBUG === "true" ||
-  process.env.DEBUG === "1" ||
   process.env.AUGMENT_DEBUG === "true" ||
   process.env.AUGMENT_DEBUG === "1";
 const debug = (...args: unknown[]) => {

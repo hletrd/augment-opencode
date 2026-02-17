@@ -96,7 +96,7 @@ OpenCode → Plugin (config + auth hooks) → Embedded Server → Auggie SDK →
 | "Token is required" | Run `auggie tokens print` and paste the output |
 | Model not found | Use hyphenated IDs: `claude-opus-4-6`, not `claude-opus-4.6` |
 | Switch auth method | Run `opencode auth login` again and pick the other option |
-| Verbose logging | Set `DEBUG=true` or `AUGMENT_DEBUG=true` before running OpenCode |
+| Verbose logging | Set `AUGMENT_DEBUG=true` before running OpenCode |
 
 ## Advanced: Standalone Server
 
