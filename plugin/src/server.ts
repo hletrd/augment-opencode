@@ -29,6 +29,7 @@ interface ChatCompletionRequest {
   model?: string;
   messages?: ChatMessage[];
   stream?: boolean;
+  workspaceRoot?: string;
 }
 
 // ACP Protocol Types
@@ -751,7 +752,7 @@ async function handleChatCompletions(
     const messages = body.messages;
     const stream = body.stream ?? false;
     const model = body.model ?? DEFAULT_MODEL;
-    const workspaceRoot = extractWorkspaceFromMessages(messages) ?? undefined;
+    const workspaceRoot = body.workspaceRoot ?? extractWorkspaceFromMessages(messages) ?? undefined;
     const prompt = formatMessages(messages);
 
     if (stream) {

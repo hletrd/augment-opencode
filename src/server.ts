@@ -31,6 +31,7 @@ interface ChatCompletionRequest {
   model?: string;
   messages?: ChatMessage[];
   stream?: boolean;
+  workspaceRoot?: string;
 }
 
 // ACP Protocol Types - Session Update Types
@@ -1543,8 +1544,8 @@ async function handleChatCompletions(req: IncomingMessage, res: ServerResponse):
     const stream = body.stream ?? false;
     const model = body.model ?? DEFAULT_MODEL;
 
-    // Extract workspace root from messages (OpenCode sends this in system message)
-    const workspaceRoot = extractWorkspaceFromMessages(messages);
+    // Extract workspace root: prefer explicit field, then parse from messages
+    const workspaceRoot = body.workspaceRoot ?? extractWorkspaceFromMessages(messages);
     if (workspaceRoot) {
       structuredLog('info', 'Request', `Extracted workspace: ${workspaceRoot}`, { requestId });
     }
