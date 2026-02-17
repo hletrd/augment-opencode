@@ -1,0 +1,48 @@
+{
+  "name": "opencode-augment-auth",
+  "version": "1.0.0",
+  "description": "OpenCode plugin for Augment Code - embedded server with auto-configuration, no separate process needed",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "augment",
+    "augment-code",
+    "auth",
+    "ai",
+    "claude",
+    "gpt"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hletrd/augment-opencode"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "dependencies": {
+    "@augmentcode/auggie-sdk": "^0.1.15",
+    "@opencode-ai/plugin": ">=0.15.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
