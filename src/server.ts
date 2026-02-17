@@ -147,7 +147,7 @@ interface ClientPool {
 }
 
 interface AuggieSDK {
-  create: (options: { model?: string; apiKey?: string; apiUrl?: string; workspaceRoot?: string }) => Promise<AuggieClient>;
+  create: (options: { model?: string; apiKey?: string; apiUrl?: string; workspaceRoot?: string; allowIndexing?: boolean }) => Promise<AuggieClient>;
 }
 
 // Configuration
@@ -671,6 +671,7 @@ async function createAuggieClient(auggieModel: string, workspaceRoot?: string): 
     apiKey: sess.accessToken,
     apiUrl: sess.tenantURL,
     workspaceRoot: workspace,
+    allowIndexing: true,
   });
   console.log(`New Auggie client created for model: ${auggieModel} (workspace: ${workspace})`);
   return client;

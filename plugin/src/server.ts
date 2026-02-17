@@ -76,6 +76,7 @@ interface AuggieSDK {
     apiKey?: string;
     apiUrl?: string;
     workspaceRoot?: string;
+    allowIndexing?: boolean;
   }) => Promise<AuggieClient>;
 }
 
@@ -187,6 +188,7 @@ async function createAuggieClient(
     apiKey: sess.accessToken,
     apiUrl: sess.tenantURL,
     workspaceRoot: workspace,
+    allowIndexing: true,
   });
 }
 
