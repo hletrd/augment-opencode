@@ -446,20 +446,62 @@ function createChatResponse(
 
 // ─── Streaming ──────────────────────────────────────────────────────────────
 
+interface StreamHandler {
+  callback: (notification: SessionNotification) => void;
+  flush: () => void;
+}
+
 function createStreamCallback(
   res: ServerResponse,
   model: string,
   requestId: string
-): (notification: SessionNotification) => void {
+): StreamHandler {
   const chunkId = `chatcmpl-${requestId}`;
 
-  return (notification: SessionNotification): void => {
+  // Reasoning buffer: collect thinking chunks and flush before first text content.
+  // The Auggie SDK may send agent_thought_chunk events before or after
+  // agent_message_chunk events. Buffering ensures reasoning appears before
+  // content in the SSE stream, so OpenCode renders thinking at the top.
+  const reasoningBuffer: string[] = [];
+  let hasStartedTextContent = false;
+  let hasFlushedReasoning = false;
+
+  function flushReasoningBuffer(): void {
+    if (hasFlushedReasoning || reasoningBuffer.length === 0) return;
+    hasFlushedReasoning = true;
+    const combined = reasoningBuffer.join("");
+    reasoningBuffer.length = 0;
+    const timestamp = Math.floor(Date.now() / 1000);
+    res.write(
+      `data: ${JSON.stringify({
+        id: chunkId,
+        object: "chat.completion.chunk",
+        created: timestamp,
+        model,
+        choices: [
+          {
+            index: 0,
+            delta: { reasoning_content: combined },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      })}\n\n`
+    );
+  }
+
+  const callback = (notification: SessionNotification): void => {
     const update = notification.update;
     const timestamp = Math.floor(Date.now() / 1000);
 
     switch (update.sessionUpdate) {
       case "agent_message_chunk":
         if (update.content?.type === "text" && update.content.text) {
+          // Flush any buffered reasoning before the first text content
+          if (!hasStartedTextContent) {
+            hasStartedTextContent = true;
+            flushReasoningBuffer();
+          }
           res.write(
             `data: ${JSON.stringify({
               id: chunkId,
@@ -481,22 +523,28 @@ function createStreamCallback(
 
       case "agent_thought_chunk":
         if (update.content?.type === "text" && update.content.text) {
-          res.write(
-            `data: ${JSON.stringify({
-              id: chunkId,
-              object: "chat.completion.chunk",
-              created: timestamp,
-              model,
-              choices: [
-                {
-                  index: 0,
-                  delta: { reasoning_content: update.content.text },
-                  finish_reason: null,
-                  logprobs: null,
-                },
-              ],
-            })}\n\n`
-          );
+          if (!hasStartedTextContent) {
+            // Buffer reasoning before text content starts
+            reasoningBuffer.push(update.content.text);
+          } else {
+            // Late reasoning: text already started, send immediately
+            res.write(
+              `data: ${JSON.stringify({
+                id: chunkId,
+                object: "chat.completion.chunk",
+                created: timestamp,
+                model,
+                choices: [
+                  {
+                    index: 0,
+                    delta: { reasoning_content: update.content.text },
+                    finish_reason: null,
+                    logprobs: null,
+                  },
+                ],
+              })}\n\n`
+            );
+          }
         }
         break;
 
@@ -513,6 +561,8 @@ function createStreamCallback(
         break;
     }
   };
+
+  return { callback, flush: flushReasoningBuffer };
 }
 
 // ─── SDK Error Check ────────────────────────────────────────────────────────
@@ -547,8 +597,8 @@ async function callStreamingInternal(
   signal?: AbortSignal
 ): Promise<void> {
   const client = await getAuggieClient(modelId, workspaceRoot);
-  const callback = createStreamCallback(res, model, requestId);
-  client.onSessionUpdate(callback);
+  const streamHandler = createStreamCallback(res, model, requestId);
+  client.onSessionUpdate(streamHandler.callback);
   let caughtError: Error | null = null;
 
   const abortPromise = signal
@@ -569,6 +619,8 @@ async function callStreamingInternal(
   } catch (err) {
     caughtError = err as Error;
   } finally {
+    // Flush any remaining buffered reasoning before cleanup
+    streamHandler.flush();
     client.onSessionUpdate(null);
     if (caughtError && (caughtError.message === "Request aborted" || isSessionError(caughtError))) {
       discardAuggieClient(modelId, client, workspaceRoot);
