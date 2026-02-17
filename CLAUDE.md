@@ -312,6 +312,33 @@ The server handles SIGTERM/SIGINT signals gracefully:
 
 ## Git Workflow
 
+### Commit Rules (MANDATORY)
+
+1. **GPG-sign all commits** — repo-level `commit.gpgSign=true` is set. Always use `-S` flag if committing manually.
+2. **Use semantic commit messages** with **gitmoji** prefixes.
+
+Format: `<gitmoji> <type>(<optional scope>): <description>`
+
+| Type       | Gitmoji | Use When                              |
+|------------|---------|---------------------------------------|
+| `feat`     | ✨      | New feature                           |
+| `fix`      | 🐛      | Bug fix                               |
+| `docs`     | 📝      | Documentation only                    |
+| `refactor` | ♻️       | Code change, no new feature or fix    |
+| `perf`     | ⚡      | Performance improvement               |
+| `chore`    | 🔧      | Maintenance, config, cleanup          |
+| `remove`   | 🔥      | Removing code or files                |
+| `test`     | ✅      | Adding/updating tests                 |
+| `hotfix`   | 🚑      | Critical hotfix                       |
+| `security` | 🔒      | Security fix                          |
+
+Examples:
+- `🐛 fix(streaming): stream thinking blocks inline instead of buffering`
+- `✨ feat(models): add GPT-5.3 model support`
+- `🔥 chore: remove unused test scripts`
+
+### SSH Key
+
 ```bash
 # Push changes (using specific SSH key)
 GIT_SSH_COMMAND="ssh -i ~/.ssh/hletrd-Github -o IdentitiesOnly=yes" git push origin main

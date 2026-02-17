@@ -153,6 +153,55 @@ When streaming is enabled, the server sends all 8 ACP protocol update types:
 
 ## Git Workflow
 
+### Commit Rules (MANDATORY)
+
+1. **GPG-sign all commits** — repo-level `commit.gpgSign=true` is set. Always use `-S` flag if committing manually.
+2. **Use semantic commit messages** with **gitmoji** prefixes.
+
+#### Commit Message Format
+
+```
+<gitmoji> <type>(<optional scope>): <description>
+
+[optional body]
+
+[optional footer]
+```
+
+#### Types and Gitmoji
+
+| Type       | Gitmoji | Code            | Use When                              |
+|------------|---------|-----------------|---------------------------------------|
+| `feat`     | ✨      | `:sparkles:`    | New feature                           |
+| `fix`      | 🐛      | `:bug:`         | Bug fix                               |
+| `docs`     | 📝      | `:memo:`        | Documentation only                    |
+| `style`    | 💄      | `:lipstick:`    | Formatting, no code change            |
+| `refactor` | ♻️       | `:recycle:`     | Code change, no new feature or fix    |
+| `perf`     | ⚡      | `:zap:`         | Performance improvement               |
+| `test`     | ✅      | `:white_check_mark:` | Adding/updating tests            |
+| `build`    | 📦      | `:package:`     | Build system or dependencies          |
+| `ci`       | 👷      | `:construction_worker:` | CI configuration              |
+| `chore`    | 🔧      | `:wrench:`      | Maintenance, config, cleanup          |
+| `revert`   | ⏪      | `:rewind:`      | Reverting a previous commit           |
+| `hotfix`   | 🚑      | `:ambulance:`   | Critical hotfix                       |
+| `security` | 🔒      | `:lock:`        | Security fix                          |
+| `init`     | 🎉      | `:tada:`        | Initial commit / major milestone      |
+| `wip`      | 🚧      | `:construction:` | Work in progress                     |
+| `remove`   | 🔥      | `:fire:`        | Removing code or files                |
+
+#### Examples
+
+```
+🐛 fix(streaming): stream thinking blocks inline instead of buffering
+✨ feat(models): add GPT-5.3 model support
+🔥 chore: remove unused test scripts
+📝 docs: update API endpoint documentation
+♻️ refactor(server): simplify client pool logic
+⚡ perf(streaming): reduce chunk overhead in SSE responses
+```
+
+### SSH Key
+
 This repo uses a specific SSH key for GitHub operations:
 
 ```bash
