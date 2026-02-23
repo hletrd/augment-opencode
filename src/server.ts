@@ -156,7 +156,7 @@ const PORT = process.env['PORT'] ?? 8765;
 const DEBUG = process.env['DEBUG'] === 'true' || process.env['DEBUG'] === '1';
 const DEFAULT_MODEL = modelsConfig.defaultModel;
 const POOL_SIZE = 5;
-const REQUEST_TIMEOUT_MS = parseInt(process.env['REQUEST_TIMEOUT_MS'] ?? '14400000', 10); // 4 hours default
+const REQUEST_TIMEOUT_MS = parseInt(process.env['REQUEST_TIMEOUT_MS'] ?? '86400000', 10); // 24 hours default
 const SHUTDOWN_TIMEOUT_MS = parseInt(process.env['SHUTDOWN_TIMEOUT_MS'] ?? '30000', 10); // 30 seconds default
 
 // Server start time for uptime tracking
@@ -235,9 +235,9 @@ let isShuttingDown = false;
 
 // Retry Configuration
 const RETRY_CONFIG = {
-  maxRetries: 5,
-  initialDelayMs: 2000,
-  maxDelayMs: 60000,
+  maxRetries: 10,
+  initialDelayMs: 3000,
+  maxDelayMs: 120000,
   backoffMultiplier: 2,
   jitterFactor: 0.1,
 } as const;
