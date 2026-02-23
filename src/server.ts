@@ -9,169 +9,56 @@ import nodePath from 'path';
 import os from 'os';
 import modelsConfig from './models.json' with { type: 'json' };
 
-// Types
-interface ModelConfig {
-  auggie: string;
-  name: string;
-  context: number;
-  output: number;
-}
+import type {
+  ModelConfig,
+  Session,
+  ChatCompletionRequest,
+  SessionNotification,
+  AuggieClient,
+  ClientPool,
+  AuggieSDK,
+  RequestMetrics,
+  LogLevel,
+  HealthStatus,
+  StreamCallbackResult,
+} from './types.js';
 
-interface Session {
-  accessToken: string;
-  tenantURL: string;
-}
+import {
+  isRateLimitError,
+  isContextLengthError,
+  isSessionError,
+  isRetryableError,
+  createOpenAIError,
+  setDefaultModel,
+} from './errors.js';
 
-interface ChatMessage {
-  role: 'user' | 'assistant' | 'system' | 'tool' | 'function';
-  content: string;
-}
-
-interface ChatCompletionRequest {
-  model?: string;
-  messages?: ChatMessage[];
-  stream?: boolean;
-  workspaceRoot?: string;
-}
-
-// ACP Protocol Types - Session Update Types
-type SessionUpdateType =
-  | 'user_message_chunk'
-  | 'agent_message_chunk'
-  | 'agent_thought_chunk'
-  | 'tool_call'
-  | 'tool_call_update'
-  | 'plan'
-  | 'available_commands_update'
-  | 'current_mode_update';
-
-type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
-type ToolKind =
-  | 'read'
-  | 'edit'
-  | 'delete'
-  | 'move'
-  | 'search'
-  | 'execute'
-  | 'think'
-  | 'fetch'
-  | 'switch_mode'
-  | 'other';
-type PlanEntryStatus = 'pending' | 'in_progress' | 'completed';
-type PlanEntryPriority = 'high' | 'medium' | 'low';
-
-interface ContentBlock {
-  type: 'text' | 'image' | 'audio' | 'resource_link' | 'resource';
-  text?: string;
-  data?: string;
-  mimeType?: string;
-  uri?: string;
-  name?: string;
-  description?: string;
-  size?: number;
-  title?: string;
-  resource?: { text?: string; blob?: string; uri: string; mimeType?: string };
-  annotations?: { audience?: string[]; lastModified?: string; priority?: number };
-  _meta?: Record<string, unknown>;
-}
-
-interface ToolCallContent {
-  type: 'content' | 'diff' | 'terminal';
-  content?: ContentBlock;
-  path?: string;
-  oldText?: string;
-  newText?: string;
-  terminalId?: string;
-  _meta?: Record<string, unknown>;
-}
-
-interface ToolCallLocation {
-  path: string;
-  line?: number;
-  _meta?: Record<string, unknown>;
-}
-
-interface PlanEntry {
-  content: string;
-  status: PlanEntryStatus;
-  priority: PlanEntryPriority;
-  _meta?: Record<string, unknown>;
-}
-
-interface AvailableCommand {
-  name: string;
-  description: string;
-  input?: { hint: string } | null;
-  _meta?: Record<string, unknown>;
-}
-
-interface SessionUpdate {
-  sessionUpdate: SessionUpdateType;
-  // For message chunks (user_message_chunk, agent_message_chunk, agent_thought_chunk)
-  content?: ContentBlock;
-  // For tool_call
-  toolCallId?: string;
-  title?: string;
-  kind?: ToolKind;
-  status?: ToolCallStatus;
-  rawInput?: Record<string, unknown>;
-  rawOutput?: Record<string, unknown>;
-  // For tool_call (content array) and tool_call_update
-  toolContent?: ToolCallContent[];
-  locations?: ToolCallLocation[];
-  // For plan
-  entries?: PlanEntry[];
-  // For available_commands_update
-  availableCommands?: AvailableCommand[];
-  // For current_mode_update
-  currentModeId?: string;
-  // Extension point
-  _meta?: Record<string, unknown>;
-}
-
-interface SessionNotification {
-  sessionId?: string;
-  update: SessionUpdate;
-  _meta?: Record<string, unknown>;
-}
-
-interface AuggieClient {
-  prompt(message: string): Promise<string>;
-  onSessionUpdate(callback: ((notification: SessionNotification) => void) | null): void;
-  close(): Promise<void>;
-}
-
-interface ClientPool {
-  available: AuggieClient[];
-  inUse: Set<AuggieClient>;
-  creating: number;
-}
-
-interface AuggieSDK {
-  create: (options: { model?: string; apiKey?: string; apiUrl?: string; workspaceRoot?: string; allowIndexing?: boolean }) => Promise<AuggieClient>;
-}
+import {
+  RETRY_CONFIG,
+  sleep,
+  calculateRetryDelay,
+  formatMessages,
+  extractWorkspaceFromMessages,
+  createChatResponse,
+  formatUptime,
+  getPoolKey,
+  isSDKErrorResponse,
+  formatToolCallContent,
+  formatLocations,
+  safeWrite,
+  validateChatCompletionRequest,
+} from './utils.js';
 
 // Configuration
 const PORT = process.env['PORT'] ?? 8765;
 const DEBUG = process.env['DEBUG'] === 'true' || process.env['DEBUG'] === '1';
 const DEFAULT_MODEL = modelsConfig.defaultModel;
+setDefaultModel(DEFAULT_MODEL);
 const POOL_SIZE = 5;
 const REQUEST_TIMEOUT_MS = parseInt(process.env['REQUEST_TIMEOUT_MS'] ?? '86400000', 10); // 24 hours default
 const SHUTDOWN_TIMEOUT_MS = parseInt(process.env['SHUTDOWN_TIMEOUT_MS'] ?? '30000', 10); // 30 seconds default
 
 // Server start time for uptime tracking
 const SERVER_START_TIME = Date.now();
-
-// Request metrics
-interface RequestMetrics {
-  totalRequests: number;
-  successfulRequests: number;
-  failedRequests: number;
-  activeRequests: number;
-  totalLatencyMs: number;
-  requestsByModel: Record<string, number>;
-  errorsByType: Record<string, number>;
-}
 
 const metrics: RequestMetrics = {
   totalRequests: 0,
@@ -187,8 +74,6 @@ const metrics: RequestMetrics = {
 const activeRequests = new Map<string, AbortController>();
 
 // Structured logging
-type LogLevel = 'debug' | 'info' | 'warn' | 'error';
-
 function structuredLog(
   level: LogLevel,
   category: string,
@@ -232,272 +117,6 @@ const clientPools: Record<string, ClientPool> = {};
 let AuggieClass: AuggieSDK | null = null;
 let session: Session | null = null;
 let isShuttingDown = false;
-
-// Retry Configuration
-const RETRY_CONFIG = {
-  maxRetries: 30,
-  initialDelayMs: 5000,
-  maxDelayMs: 600000,
-  backoffMultiplier: 2,
-  jitterFactor: 0.1,
-} as const;
-
-// Error Types for OpenAI-compatible responses
-type OpenAIErrorType = 'invalid_request_error' | 'rate_limit_error' | 'server_error' | 'api_error';
-type OpenAIErrorCode =
-  | 'context_length_exceeded'
-  | 'rate_limit_exceeded'
-  | 'server_error'
-  | 'invalid_api_key'
-  | 'model_not_found'
-  | 'request_timeout'
-  | 'connection_error'
-  | null;
-
-interface OpenAIError {
-  error: {
-    message: string;
-    type: OpenAIErrorType;
-    code: OpenAIErrorCode;
-    param?: string | null;
-    suggestion?: string;
-  };
-}
-
-interface AugmentAPIError extends Error {
-  statusCode?: number;
-  code?: string;
-  retryable?: boolean;
-}
-
-// Error detection utilities
-function isRateLimitError(error: Error): boolean {
-  const message = error.message.toLowerCase();
-  const augmentError = error as AugmentAPIError;
-  return (
-    augmentError.statusCode === 429 ||
-    message.includes('rate limit') ||
-    message.includes('rate_limit') ||
-    message.includes('too many requests') ||
-    message.includes('quota exceeded') ||
-    message.includes('throttl')
-  );
-}
-
-function isContextLengthError(error: Error): boolean {
-  const message = error.message.toLowerCase();
-  return (
-    message.includes('context length') ||
-    message.includes('context_length') ||
-    message.includes('token limit') ||
-    message.includes('too long') ||
-    message.includes('maximum context') ||
-    message.includes('message too large') ||
-    message.includes('input too long') ||
-    message.includes('exceeds the model') ||
-    message.includes('max_tokens')
-  );
-}
-
-function isSessionError(error: Error): boolean {
-  const message = error.message.toLowerCase();
-  return (
-    message.includes('not connected') ||
-    message.includes('no session') ||
-    message.includes('initialization failed') ||
-    message.includes('session expired') ||
-    message.includes('session invalid') ||
-    message.includes('websocket') ||
-    message.includes('disconnected')
-  );
-}
-
-function isTransientError(error: Error): boolean {
-  const message = error.message.toLowerCase();
-  const augmentError = error as AugmentAPIError;
-  const statusCode = augmentError.statusCode ?? 0;
-
-  // 5xx server errors are transient
-  if (statusCode >= 500 && statusCode < 600) return true;
-
-  // Session/connection errors from SDK are transient (can retry with new client)
-  if (isSessionError(error)) return true;
-
-  // Network-related errors
-  if (
-    message.includes('network') ||
-    message.includes('timeout') ||
-    message.includes('timed out') ||
-    message.includes('econnreset') ||
-    message.includes('econnrefused') ||
-    message.includes('socket hang up') ||
-    message.includes('connection') ||
-    message.includes('temporarily unavailable') ||
-    message.includes('service unavailable') ||
-    message.includes('internal server error')
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-function isRetryableError(error: Error): boolean {
-  // Context length errors are NOT retryable - need to reduce input
-  if (isContextLengthError(error)) return false;
-
-  // Rate limits and transient errors are retryable
-  return isRateLimitError(error) || isTransientError(error);
-}
-
-function createOpenAIError(error: Error): OpenAIError {
-  const errorMsg = error.message.toLowerCase();
-
-  if (isContextLengthError(error)) {
-    return {
-      error: {
-        message: `Context length exceeded: ${error.message}`,
-        type: 'invalid_request_error',
-        code: 'context_length_exceeded',
-        param: 'messages',
-        suggestion:
-          'Reduce the number of messages, shorten message content, or use a model with larger context window.',
-      },
-    };
-  }
-
-  if (isRateLimitError(error)) {
-    return {
-      error: {
-        message: `Rate limit exceeded: ${error.message}`,
-        type: 'rate_limit_error',
-        code: 'rate_limit_exceeded',
-        param: null,
-        suggestion:
-          'Wait a moment before retrying. Consider reducing request frequency or implementing exponential backoff.',
-      },
-    };
-  }
-
-  // Session/connection errors from SDK - provide specific guidance
-  if (isSessionError(error)) {
-    return {
-      error: {
-        message: `SDK session error: ${error.message}`,
-        type: 'server_error',
-        code: 'connection_error',
-        param: null,
-        suggestion:
-          'The Augment SDK connection was lost. This is usually temporary. ' +
-          'If the issue persists: 1) Run "auggie login" to refresh authentication, ' +
-          '2) Restart the server, 3) Check your network connection.',
-      },
-    };
-  }
-
-  if (isTransientError(error)) {
-    return {
-      error: {
-        message: `Server error: ${error.message}`,
-        type: 'server_error',
-        code: 'server_error',
-        param: null,
-        suggestion: 'This is likely a temporary issue. Please retry your request in a few seconds.',
-      },
-    };
-  }
-
-  // Authentication errors
-  if (errorMsg.includes('unauthorized') || errorMsg.includes('invalid api key')) {
-    return {
-      error: {
-        message: `Authentication failed: ${error.message}`,
-        type: 'invalid_request_error',
-        code: 'invalid_api_key',
-        param: null,
-        suggestion:
-          'Run "auggie login" to authenticate with Augment Code, then restart the server.',
-      },
-    };
-  }
-
-  // Model not found
-  if (
-    errorMsg.includes('model') &&
-    (errorMsg.includes('not found') || errorMsg.includes('invalid'))
-  ) {
-    return {
-      error: {
-        message: `Invalid model: ${error.message}`,
-        type: 'invalid_request_error',
-        code: 'model_not_found',
-        param: 'model',
-        suggestion: `Use GET /v1/models to see available models. Default model: ${DEFAULT_MODEL}`,
-      },
-    };
-  }
-
-  // Timeout error
-  if (
-    errorMsg.includes('timeout') ||
-    errorMsg.includes('timed out') ||
-    error.name === 'AbortError'
-  ) {
-    return {
-      error: {
-        message: `Request timeout: ${error.message}`,
-        type: 'server_error',
-        code: 'request_timeout',
-        param: null,
-        suggestion:
-          'The request took too long to process. Try a shorter prompt or increase REQUEST_TIMEOUT_MS.',
-      },
-    };
-  }
-
-  // Connection errors
-  if (
-    errorMsg.includes('econnrefused') ||
-    errorMsg.includes('enotfound') ||
-    errorMsg.includes('network')
-  ) {
-    return {
-      error: {
-        message: `Connection error: ${error.message}`,
-        type: 'server_error',
-        code: 'connection_error',
-        param: null,
-        suggestion: 'Check your network connection and ensure the Augment Code API is reachable.',
-      },
-    };
-  }
-
-  // Generic API error
-  return {
-    error: {
-      message: error.message,
-      type: 'api_error',
-      code: null,
-      param: null,
-      suggestion: 'Check the error message for details. If the issue persists, check server logs.',
-    },
-  };
-}
-
-// Sleep utility with jitter
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function calculateRetryDelay(attempt: number): number {
-  const baseDelay = Math.min(
-    RETRY_CONFIG.initialDelayMs * Math.pow(RETRY_CONFIG.backoffMultiplier, attempt),
-    RETRY_CONFIG.maxDelayMs
-  );
-  // Add jitter (±10%)
-  const jitter = baseDelay * RETRY_CONFIG.jitterFactor * (Math.random() * 2 - 1);
-  return Math.floor(baseDelay + jitter);
-}
 
 // Retry wrapper for async operations
 async function withRetry<T>(
@@ -678,12 +297,6 @@ async function createAuggieClient(auggieModel: string, workspaceRoot?: string): 
   return client;
 }
 
-// Generate pool key combining model and workspace
-function getPoolKey(auggieModel: string, workspaceRoot?: string): string {
-  const workspace = workspaceRoot ?? process.cwd();
-  return `${auggieModel}:${workspace}`;
-}
-
 async function getAuggieClient(modelId: string, workspaceRoot?: string): Promise<AuggieClient> {
   const modelConfig = MODEL_MAP[modelId] ?? MODEL_MAP[DEFAULT_MODEL];
   if (!modelConfig) {
@@ -806,284 +419,12 @@ function parseBody(req: IncomingMessage): Promise<ChatCompletionRequest> {
   });
 }
 
-// Request validation
-interface ValidationResult {
-  valid: boolean;
-  error?: {
-    message: string;
-    type: string;
-    code: string;
-    param?: string;
-  };
-}
-
-// Input type for validation (raw JSON input before type narrowing)
-interface RawChatCompletionRequest {
-  model?: unknown;
-  messages?: unknown;
-  stream?: unknown;
-}
-
-interface RawChatMessage {
-  role?: unknown;
-  content?: unknown;
-}
-
-function validateChatCompletionRequest(body: RawChatCompletionRequest): ValidationResult {
-  // Validate messages array
-  if (!body.messages) {
-    return {
-      valid: false,
-      error: {
-        message: 'Missing required parameter: messages',
-        type: 'invalid_request_error',
-        code: 'missing_required_parameter',
-        param: 'messages',
-      },
-    };
-  }
-
-  if (!Array.isArray(body.messages)) {
-    return {
-      valid: false,
-      error: {
-        message: 'messages must be an array',
-        type: 'invalid_request_error',
-        code: 'invalid_type',
-        param: 'messages',
-      },
-    };
-  }
-
-  if (body.messages.length === 0) {
-    return {
-      valid: false,
-      error: {
-        message: 'messages array must not be empty',
-        type: 'invalid_request_error',
-        code: 'invalid_value',
-        param: 'messages',
-      },
-    };
-  }
-
-  // Validate each message
-  const messages = body.messages as RawChatMessage[];
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
-    if (!msg) continue;
-
-    if (!msg.role) {
-      return {
-        valid: false,
-        error: {
-          message: `messages[${String(i)}].role is required`,
-          type: 'invalid_request_error',
-          code: 'missing_required_parameter',
-          param: `messages[${String(i)}].role`,
-        },
-      };
-    }
-
-    // OpenAI API supports: user, assistant, system, tool, function
-    const validRoles = ['user', 'assistant', 'system', 'tool', 'function'];
-    if (typeof msg.role !== 'string' || !validRoles.includes(msg.role)) {
-      return {
-        valid: false,
-        error: {
-          message: `messages[${String(i)}].role must be one of: ${validRoles.join(', ')}`,
-          type: 'invalid_request_error',
-          code: 'invalid_value',
-          param: `messages[${String(i)}].role`,
-        },
-      };
-    }
-
-    if (msg.content === undefined || msg.content === null) {
-      return {
-        valid: false,
-        error: {
-          message: `messages[${String(i)}].content is required`,
-          type: 'invalid_request_error',
-          code: 'missing_required_parameter',
-          param: `messages[${String(i)}].content`,
-        },
-      };
-    }
-
-    if (typeof msg.content !== 'string') {
-      return {
-        valid: false,
-        error: {
-          message: `messages[${String(i)}].content must be a string`,
-          type: 'invalid_request_error',
-          code: 'invalid_type',
-          param: `messages[${String(i)}].content`,
-        },
-      };
-    }
-  }
-
-  // Validate model if provided
-  if (body.model !== undefined && typeof body.model !== 'string') {
-    return {
-      valid: false,
-      error: {
-        message: 'model must be a string',
-        type: 'invalid_request_error',
-        code: 'invalid_type',
-        param: 'model',
-      },
-    };
-  }
-
-  // Validate stream if provided
-  if (body.stream !== undefined && typeof body.stream !== 'boolean') {
-    return {
-      valid: false,
-      error: {
-        message: 'stream must be a boolean',
-        type: 'invalid_request_error',
-        code: 'invalid_type',
-        param: 'stream',
-      },
-    };
-  }
-
-  return { valid: true };
-}
-
-function formatMessages(messages: ChatMessage[]): string {
-  return messages
-    .map((m) => {
-      let role: string;
-      switch (m.role) {
-        case 'assistant':
-          role = 'Assistant';
-          break;
-        case 'system':
-          role = 'System';
-          break;
-        case 'tool':
-          role = 'Tool Result';
-          break;
-        case 'function':
-          role = 'Function Result';
-          break;
-        default:
-          role = 'User';
-      }
-      return `${role}: ${m.content}`;
-    })
-    .join('\n\n');
-}
-
-// Extract workspace root from messages - OpenCode sends this in system message
-function extractWorkspaceFromMessages(messages: ChatMessage[]): string | null {
-  for (const msg of messages) {
-    if (msg.role === 'system' && msg.content) {
-      // Pattern 1: <supervisor>The user's workspace is opened at /path/to/workspace.</supervisor>
-      const supervisorMatch = msg.content.match(
-        /<supervisor>[^<]*?(?:workspace is opened at|workspace is)\s+[`"']?([^`"'<\n]+)[`"']?/i
-      );
-      if (supervisorMatch?.[1]) {
-        return supervisorMatch[1].trim().replace(/\.$/, '');
-      }
-
-      // Pattern 2: Workspace: /path/to/workspace
-      const workspaceMatch = msg.content.match(/(?:workspace|working directory|cwd):\s*[`"']?([^\s`"'\n]+)/i);
-      if (workspaceMatch?.[1]) {
-        return workspaceMatch[1].trim();
-      }
-    }
-  }
-  return null;
-}
-
-// Estimate token counts (rough approximation: ~4 chars per token)
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
-
-function createChatResponse(content: string, model: string, promptText?: string) {
-  const promptTokens = promptText ? estimateTokens(promptText) : 0;
-  const completionTokens = estimateTokens(content);
-
-  return {
-    id: `chatcmpl-${randomUUID()}`,
-    object: 'chat.completion',
-    created: Math.floor(Date.now() / 1000),
-    model: model || DEFAULT_MODEL,
-    system_fingerprint: `auggie-wrapper-${process.env['npm_package_version'] ?? '1.0.0'}`,
-    choices: [
-      {
-        index: 0,
-        message: { role: 'assistant', content },
-        finish_reason: 'stop',
-        logprobs: null,
-      },
-    ],
-    usage: {
-      prompt_tokens: promptTokens,
-      completion_tokens: completionTokens,
-      total_tokens: promptTokens + completionTokens,
-      prompt_tokens_details: { cached_tokens: 0, audio_tokens: 0 },
-      completion_tokens_details: {
-        reasoning_tokens: 0,
-        audio_tokens: 0,
-        accepted_prediction_tokens: 0,
-        rejected_prediction_tokens: 0,
-      },
-    },
-    service_tier: 'default',
-  };
-}
-
 // System fingerprint for reproducibility tracking
 const SYSTEM_FINGERPRINT = `auggie-wrapper-${process.env['npm_package_version'] ?? '1.0.0'}`;
-
-
-// Helper to format tool call content for streaming
-function formatToolCallContent(toolContent?: ToolCallContent[]): string {
-  if (!toolContent || toolContent.length === 0) return '';
-  return toolContent
-    .map((tc) => {
-      if (tc.type === 'content' && tc.content?.type === 'text' && tc.content.text) {
-        return tc.content.text;
-      }
-      if (tc.type === 'diff') {
-        return `[File: ${tc.path ?? 'unknown'}]\n${tc.newText ?? ''}`;
-      }
-      if (tc.type === 'terminal') {
-        return `[Terminal: ${tc.terminalId ?? 'unknown'}]`;
-      }
-      return '';
-    })
-    .filter(Boolean)
-    .join('\n');
-}
-
-// Helper to format locations
-function formatLocations(locations?: ToolCallLocation[]): string {
-  if (!locations || locations.length === 0) return '';
-  return locations.map((loc) => `${loc.path}${loc.line ? `:${String(loc.line)}` : ''}`).join(', ');
-}
 
 // Track tool call indices for consistent streaming
 const toolCallIndices = new Map<string, number>();
 let toolCallCounter = 0;
-
-interface StreamCallbackResult {
-  callback: (notification: SessionNotification) => void;
-}
-
-// Safe write helper - guards against writing to a destroyed/closed response
-function safeWrite(res: ServerResponse, data: string): boolean {
-  if (!res.destroyed && res.writable) {
-    return res.write(data);
-  }
-  return false;
-}
 
 function createStreamCallback(res: ServerResponse, model: string, requestId: string): StreamCallbackResult {
   // Reset tool call tracking for this request
@@ -1280,24 +621,6 @@ function createStreamCallback(res: ServerResponse, model: string, requestId: str
   return {
     callback,
   };
-}
-
-// Check if response is an SDK error (JSON with error field)
-function isSDKErrorResponse(response: string): { isError: boolean; message?: string } {
-  try {
-    const parsed = JSON.parse(response) as Record<string, unknown>;
-    const errorField = parsed['error'];
-    if (typeof errorField === 'string') {
-      return { isError: true, message: errorField };
-    }
-    if (errorField && typeof errorField === 'object') {
-      const errObj = errorField as Record<string, unknown>;
-      return { isError: true, message: (errObj['message'] as string) ?? String(errObj) };
-    }
-  } catch {
-    // Not JSON, so not an error response
-  }
-  return { isError: false };
 }
 
 async function callAugmentAPIStreamingInternal(
@@ -1641,7 +964,7 @@ async function handleChatCompletions(req: IncomingMessage, res: ServerResponse):
     } else {
       const response = await callAugmentAPI(prompt, model, requestId, workspaceRoot ?? undefined, abortController.signal);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(createChatResponse(response, model, prompt)));
+      res.end(JSON.stringify(createChatResponse(response, model, DEFAULT_MODEL, prompt)));
       cleanup(true);
       structuredLog('info', 'Request', 'Request completed', {
         requestId,
@@ -1690,54 +1013,6 @@ function handleModel(_req: IncomingMessage, res: ServerResponse, modelId: string
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: { message: 'Model not found' } }));
   }
-}
-
-// Enhanced health check with detailed status
-interface HealthStatus {
-  status: 'ok' | 'degraded' | 'unhealthy';
-  message: string;
-  timestamp: string;
-  uptime: {
-    seconds: number;
-    formatted: string;
-  };
-  metrics: {
-    totalRequests: number;
-    successfulRequests: number;
-    failedRequests: number;
-    activeRequests: number;
-    averageLatencyMs: number;
-    successRate: string;
-  };
-  models: {
-    available: string[];
-    default: string;
-  };
-  memory: {
-    heapUsedMB: number;
-    heapTotalMB: number;
-    rssMB: number;
-  };
-  config: {
-    requestTimeoutMs: number;
-    shutdownTimeoutMs: number;
-    poolSize: number;
-  };
-}
-
-function formatUptime(seconds: number): string {
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-
-  const parts: string[] = [];
-  if (days > 0) parts.push(`${String(days)}d`);
-  if (hours > 0) parts.push(`${String(hours)}h`);
-  if (minutes > 0) parts.push(`${String(minutes)}m`);
-  parts.push(`${String(secs)}s`);
-
-  return parts.join(' ');
 }
 
 function handleHealth(_req: IncomingMessage, res: ServerResponse): void {
@@ -1849,69 +1124,75 @@ function setCorsHeaders(res: ServerResponse): void {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
-const server = http.createServer((req, res) => {
-  setCorsHeaders(res);
+export function createApp(): http.Server {
+  const app = http.createServer((req, res) => {
+    setCorsHeaders(res);
 
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
 
-  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-  const urlPath = url.pathname;
+    const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+    const urlPath = url.pathname;
 
-  structuredLog('info', 'HTTP', `${req.method ?? 'UNKNOWN'} ${urlPath}`);
+    structuredLog('info', 'HTTP', `${req.method ?? 'UNKNOWN'} ${urlPath}`);
 
-  if (urlPath === '/v1/chat/completions' && req.method === 'POST') {
-    void handleChatCompletions(req, res);
-  } else if (urlPath === '/v1/models' && req.method === 'GET') {
-    handleModels(req, res);
-  } else if (urlPath.startsWith('/v1/models/') && req.method === 'GET') {
-    const modelId = urlPath.replace('/v1/models/', '');
-    handleModel(req, res, modelId);
-  } else if (urlPath === '/health') {
-    // Detailed health check
-    handleHealth(req, res);
-  } else if (urlPath === '/' || urlPath === '/healthz' || urlPath === '/ready') {
-    // Simple health check for load balancers
-    handleHealthSimple(req, res);
-  } else if (urlPath === '/version') {
-    // Version endpoint
-    handleVersion(req, res);
-  } else if (urlPath === '/metrics') {
-    // Metrics endpoint
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(
-      JSON.stringify(
-        {
-          timestamp: new Date().toISOString(),
-          ...metrics,
-          averageLatencyMs:
-            metrics.totalRequests > 0
-              ? Math.round(metrics.totalLatencyMs / metrics.totalRequests)
-              : 0,
-        },
-        null,
-        2
-      )
-    );
-  } else {
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: { message: 'Not found' } }));
-  }
-});
+    if (urlPath === '/v1/chat/completions' && req.method === 'POST') {
+      void handleChatCompletions(req, res);
+    } else if (urlPath === '/v1/models' && req.method === 'GET') {
+      handleModels(req, res);
+    } else if (urlPath.startsWith('/v1/models/') && req.method === 'GET') {
+      const modelId = urlPath.replace('/v1/models/', '');
+      handleModel(req, res, modelId);
+    } else if (urlPath === '/health') {
+      // Detailed health check
+      handleHealth(req, res);
+    } else if (urlPath === '/' || urlPath === '/healthz' || urlPath === '/ready') {
+      // Simple health check for load balancers
+      handleHealthSimple(req, res);
+    } else if (urlPath === '/version') {
+      // Version endpoint
+      handleVersion(req, res);
+    } else if (urlPath === '/metrics') {
+      // Metrics endpoint
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify(
+          {
+            timestamp: new Date().toISOString(),
+            ...metrics,
+            averageLatencyMs:
+              metrics.totalRequests > 0
+                ? Math.round(metrics.totalLatencyMs / metrics.totalRequests)
+                : 0,
+          },
+          null,
+          2
+        )
+      );
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: { message: 'Not found' } }));
+    }
+  });
 
-// Configure keep-alive for better performance
-// Keep connections alive for 60 seconds (default is 5 seconds in Node.js)
-server.keepAliveTimeout = 60000;
-// Ensure headers timeout is greater than keep-alive timeout
-server.headersTimeout = 65000;
-// Disable socket timeout entirely - streaming SSE connections can be very long-lived
-// and we manage timeouts per-request via AbortController instead
-server.timeout = 0;
-// Disable request timeout to prevent Node.js from closing long-lived connections
-server.requestTimeout = 0;
+  // Configure keep-alive for better performance
+  // Keep connections alive for 60 seconds (default is 5 seconds in Node.js)
+  app.keepAliveTimeout = 60000;
+  // Ensure headers timeout is greater than keep-alive timeout
+  app.headersTimeout = 65000;
+  // Disable socket timeout entirely - streaming SSE connections can be very long-lived
+  // and we manage timeouts per-request via AbortController instead
+  app.timeout = 0;
+  // Disable request timeout to prevent Node.js from closing long-lived connections
+  app.requestTimeout = 0;
+
+  return app;
+}
+
+const server = createApp();
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string): Promise<void> {
@@ -2017,5 +1298,8 @@ ${Object.entries(MODEL_MAP)
   });
 }
 
-// Start the server
-void startServer();
+// Only start the server when this file is run directly
+const isMainModule = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+if (isMainModule) {
+  void startServer();
+}
