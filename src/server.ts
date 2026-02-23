@@ -1077,6 +1077,14 @@ interface StreamCallbackResult {
   callback: (notification: SessionNotification) => void;
 }
 
+// Safe write helper - guards against writing to a destroyed/closed response
+function safeWrite(res: ServerResponse, data: string): boolean {
+  if (!res.destroyed && res.writable) {
+    return res.write(data);
+  }
+  return false;
+}
+
 function createStreamCallback(res: ServerResponse, model: string, requestId: string): StreamCallbackResult {
   // Reset tool call tracking for this request
   toolCallIndices.clear();
@@ -1142,7 +1150,7 @@ function createStreamCallback(res: ServerResponse, model: string, requestId: str
               },
             ],
           };
-          res.write(`data: ${JSON.stringify(textChunk)}\n\n`);
+          safeWrite(res, `data: ${JSON.stringify(textChunk)}\n\n`);
         }
         break;
 
@@ -1172,7 +1180,7 @@ function createStreamCallback(res: ServerResponse, model: string, requestId: str
               },
             ],
           };
-          res.write(`data: ${JSON.stringify(thoughtChunk)}\n\n`);
+          safeWrite(res, `data: ${JSON.stringify(thoughtChunk)}\n\n`);
         }
         break;
 
@@ -1310,6 +1318,14 @@ async function callAugmentAPIStreamingInternal(
   let hasError = false;
   let caughtError: Error | null = null;
 
+  // Send SSE keepalive comments every 15 seconds to prevent connection timeouts
+  // during long tool executions where no data is streamed to the client
+  const keepaliveInterval = setInterval(() => {
+    if (safeWrite(res, ':keepalive\n\n')) {
+      structuredLog('debug', 'Keepalive', 'Sent SSE keepalive ping', { requestId });
+    }
+  }, 15000);
+
   // Create a promise that rejects when abort signal fires
   const abortPromise = abortSignal
     ? new Promise<never>((_, reject) => {
@@ -1317,9 +1333,8 @@ async function callAugmentAPIStreamingInternal(
           reject(new Error('Request aborted'));
           return;
         }
-        abortSignal.addEventListener('abort', () => {
-          reject(new Error('Request aborted'));
-        });
+        const onAbort = () => { reject(new Error('Request aborted')); };
+        abortSignal.addEventListener('abort', onAbort, { once: true });
       })
     : null;
 
@@ -1342,6 +1357,7 @@ async function callAugmentAPIStreamingInternal(
     hasError = true;
     caughtError = err as Error;
   } finally {
+    clearInterval(keepaliveInterval);
     client.onSessionUpdate(null);
     // Discard client on session errors or aborts, otherwise return to pool
     if (hasError && caughtError) {
@@ -1371,11 +1387,9 @@ async function callAugmentAPIStreaming(
   workspaceRoot?: string,
   abortSignal?: AbortSignal
 ): Promise<void> {
-  await withRetry(
-    () => callAugmentAPIStreamingInternal(prompt, modelId, res, requestId, model, workspaceRoot, abortSignal),
-    'Augment API Streaming',
-    requestId
-  );
+  // Do NOT use withRetry for streaming - retrying after partial data has been
+  // sent to the client would cause duplicate/corrupted output
+  await callAugmentAPIStreamingInternal(prompt, modelId, res, requestId, model, workspaceRoot, abortSignal);
 }
 
 async function callAugmentAPIInternal(
@@ -1575,6 +1589,17 @@ async function handleChatCompletions(req: IncomingMessage, res: ServerResponse):
     }
 
     if (stream) {
+      // Disable socket timeout for streaming connections to prevent
+      // Node.js from closing long-running SSE connections
+      req.setTimeout(0);
+      res.setTimeout(0);
+
+      // Enable TCP keepalive to prevent OS/network-level connection drops
+      if (req.socket) {
+        req.socket.setKeepAlive(true, 30000);
+        req.socket.setNoDelay(true);
+      }
+
       // Disable response buffering for real-time streaming
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -1597,18 +1622,22 @@ async function handleChatCompletions(req: IncomingMessage, res: ServerResponse):
           system_fingerprint: SYSTEM_FINGERPRINT,
           choices: [{ index: 0, delta: {}, finish_reason: 'stop', logprobs: null }],
         };
-        res.write(`data: ${JSON.stringify(stopChunk)}\n\n`);
-        res.write('data: [DONE]\n\n');
+        safeWrite(res, `data: ${JSON.stringify(stopChunk)}\n\n`);
+        safeWrite(res, 'data: [DONE]\n\n');
         cleanup(true);
       } catch (err) {
         const error = err as Error;
         structuredLog('error', 'Request', 'Streaming error', { requestId, data: error.message });
-        // Send OpenAI-compatible error in stream format
-        const openAIError = createOpenAIError(error);
-        res.write(`data: ${JSON.stringify(openAIError)}\n\n`);
+        // Send OpenAI-compatible error in stream format (only if connection is still open)
+        if (!res.destroyed && res.writable) {
+          const openAIError = createOpenAIError(error);
+          safeWrite(res, `data: ${JSON.stringify(openAIError)}\n\n`);
+        }
         cleanup(false, error.name);
       }
-      res.end();
+      if (!res.destroyed) {
+        res.end();
+      }
     } else {
       const response = await callAugmentAPI(prompt, model, requestId, workspaceRoot ?? undefined, abortController.signal);
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1878,6 +1907,11 @@ const server = http.createServer((req, res) => {
 server.keepAliveTimeout = 60000;
 // Ensure headers timeout is greater than keep-alive timeout
 server.headersTimeout = 65000;
+// Disable socket timeout entirely - streaming SSE connections can be very long-lived
+// and we manage timeouts per-request via AbortController instead
+server.timeout = 0;
+// Disable request timeout to prevent Node.js from closing long-lived connections
+server.requestTimeout = 0;
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string): Promise<void> {
