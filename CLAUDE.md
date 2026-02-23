@@ -18,7 +18,13 @@ OpenCode/Client → HTTP Request → src/server.ts (builds to dist/server.js) �
 
 | File | Purpose |
 |------|---------|
-| `src/server.ts` | Main HTTP server - OpenAI-compatible API proxy (TypeScript) |
+| `src/server.ts` | Main HTTP server - OpenAI-compatible API proxy |
+| `src/types.ts` | All TypeScript interfaces and type aliases |
+| `src/errors.ts` | Error classification and OpenAI error creation |
+| `src/utils.ts` | Pure utility functions (formatting, validation, retry) |
+| `src/models.json` | Model configuration (IDs, names, context/output limits) |
+| `vitest.config.ts` | Test framework configuration |
+| `tests/` | Unit, integration, and E2E tests (163 tests) |
 | `setup.sh` | Automated setup script for dependencies and OpenCode config |
 | `package.json` | Node.js project configuration |
 | `README.md` | User documentation |
@@ -26,7 +32,7 @@ OpenCode/Client → HTTP Request → src/server.ts (builds to dist/server.js) �
 
 ### server.ts Details
 
-- Single-file Node.js HTTP server using native `http` module
+- Multi-module Node.js HTTP server using native `http` module (types, errors, utils extracted)
 - ES modules (`"type": "module"` in package.json)
 - Exposes OpenAI-compatible endpoints:
   - `POST /v1/chat/completions` - Chat completions (streaming supported)
@@ -71,6 +77,20 @@ npm run dev
 
 # Run automated setup
 ./setup.sh
+
+# Run tests
+npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run tests with coverage report
+npm run test:coverage
+
+# Run specific test suites
+npm run test:unit
+npm run test:integration
+npm run test:e2e
 
 # Test endpoints
 curl http://localhost:8765/health
@@ -175,6 +195,8 @@ Provider uses `@ai-sdk/openai-compatible` npm package:
 | Package | Purpose |
 |---------|---------|
 | `@augmentcode/auggie-sdk` | Augment Code SDK for API access |
+| `vitest` | Test framework (dev) |
+| `@vitest/coverage-v8` | V8-based code coverage (dev) |
 
 **Runtime Requirements**:
 - Node.js 24+ (ES modules, native fetch)
