@@ -235,9 +235,9 @@ let isShuttingDown = false;
 
 // Retry Configuration
 const RETRY_CONFIG = {
-  maxRetries: 10,
-  initialDelayMs: 3000,
-  maxDelayMs: 120000,
+  maxRetries: 30,
+  initialDelayMs: 5000,
+  maxDelayMs: 600000,
   backoffMultiplier: 2,
   jitterFactor: 0.1,
 } as const;
